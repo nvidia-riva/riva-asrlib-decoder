@@ -1,0 +1,8 @@
+bazel-*
+*.so
+*.pyc
+__pycache__
+build*
+.eggs
+*.egg-info
+dist/

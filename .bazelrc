@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+build --crosstool_top=@local_config_cuda//crosstool:toolchain
+build --define=using_cuda=true --define=using_cuda_nvcc=true --define=using_cuda_clang=false
+
+# build:cuda_clang --crosstool_top=@local_config_cuda//crosstool:toolchain
+# build:cuda_clang --define=using_cuda=true --define=using_cuda_clang=true
+
+# build:win-cuda --define=using_cuda=true --define=using_cuda_nvcc=true
+
+build --action_env TF_NEED_CUDA="1"
+build --action_env TF_NEED_OPENCL="1"
+build --action_env TF_CUDA_CLANG="0"
+build --action_env HOST_CXX_COMPILER="/usr/bin/clang"
+build --action_env HOST_C_COMPILER="/usr/bin/clang"
+build --action_env CLANG_CUDA_COMPILER_PATH="/usr/bin/clang"
+build --action_env GCC_HOST_COMPILER_PATH="/usr/bin/gcc"
+build --action_env CUDA_TOOLKIT_PATH="/usr/local/cuda-11.3"
+build --action_env TF_CUDA_VERSION="11.3"
+build --action_env TF_CUDNN_VERSION=""
+build --action_env CUDNN_INSTALL_PATH="/usr"
+build --action_env TF_CUDA_COMPUTE_CAPABILITIES="7.0,7.5,8.0,8.6"
+build --action_env COMPUTECPP_TOOLKIT_PATH="/usr/local/computecpp"
+build --action_env TMP="/tmp"
+build --action_env PYTHON_BIN_PATH="/usr/bin/python3"
+
+build --cxxopt='-std=c++17'
+# build --show_timestamps --keep_going --color=yes --cxxopt='-std=c++1z' --linkopt='-lstdc++fs

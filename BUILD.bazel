@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+package(
+    default_visibility = ["//visibility:public"],
+)
+
+load("@local_config_cuda//cuda:build_defs.bzl", "cuda_library")
+
+cuda_library(
+  name="kaldi",
+  srcs = glob([
+  "third_party/kaldi/src/base/*.cc",
+  "third_party/kaldi/src/util/*.cc",
+  "third_party/kaldi/src/matrix/*.cc",
+  # "third_party/kaldi/src/feat/*.cc",
+  "third_party/kaldi/src/fstext/*.cc",
+  "third_party/kaldi/src/decoder/grammar-fst.cc",
+  "third_party/kaldi/src/decoder/lattice-faster-decoder.cc",
+  "third_party/kaldi/src/decoder/lattice-faster-online-decoder.cc",
+  "third_party/kaldi/src/decoder/lattice-incremental-decoder.cc",
+  "third_party/kaldi/src/decoder/lattice-incremental-online-decoder.cc",
+  "third_party/kaldi/src/lm/*.cc",
+  "third_party/kaldi/src/lat/*.cc",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder.cc",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder-kernels.cu",
+  "third_party/kaldi/src/online2/online-endpoint.cc",
+  "third_party/kaldi/src/cudadecoder/lattice-postprocessor.cc",
+  "third_party/kaldi/src/cudadecoder/cuda-fst.cc",
+  "include/base/version.h",
+  "include/matrix/cblas-wrappers.h",
+  ],
+  exclude = ["third_party/kaldi/src/lat/word-align-lattice-lexicon.cc",
+             "third_party/kaldi/src/lat/lattice-functions-transition-model.cc",
+             "third_party/kaldi/src/*/*test.cc",
+             ]
+  ),
+  hdrs = glob([
+  "third_party/kaldi/src/base/*.h",
+  "third_party/kaldi/src/util/*.h",
+  "third_party/kaldi/src/matrix/*.h",
+  # "third_party/kaldi/src/feat/*.h",
+  "third_party/kaldi/src/fstext/*.h",
+  "third_party/kaldi/src/decoder/grammar-fst.h",
+  "third_party/kaldi/src/decoder/lattice-faster-decoder.h",
+  "third_party/kaldi/src/decoder/lattice-faster-online-decoder.h",
+  "third_party/kaldi/src/decoder/lattice-incremental-decoder.h",
+  "third_party/kaldi/src/decoder/lattice-incremental-online-decoder.h",
+  # Do cudafeat later
+  "third_party/kaldi/src/lm/*.h",
+  "third_party/kaldi/src/lat/*.h",
+  # These two files contain some common macros. CuMatrix and
+  # CuVector are not brought in.
+  "third_party/kaldi/src/cudamatrix/cu-common.h",
+  "third_party/kaldi/src/cudamatrix/cu-matrixdim.h",
+  "third_party/kaldi/src/cudadecoder/cuda-decodable-itf.h",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder-common.h",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder.h",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder-kernels.h",
+  "third_party/kaldi/src/cudadecoder/cuda-decoder-kernels-utils.h",
+  "third_party/kaldi/src/cudadecoder/cuda-pipeline-common.h",
+  "third_party/kaldi/src/cudadecoder/cuda-fst.h",
+  "third_party/kaldi/src/cudadecoder/thread-pool.h",
+  "third_party/kaldi/src/cudadecoder/thread-pool-light.h",
+  "third_party/kaldi/src/cudadecoder/lattice-postprocessor.h",
+  "third_party/kaldi/src/online2/online-endpoint.h",
+  "third_party/kaldi/src/itf/*.h",
+  ],
+  exclude = ["third_party/kaldi/src/matrix/cblas-wrappers.h",
+             "third_party/kaldi/src/lat/word-align-lattice-lexicon.h",
+             "third_party/kaldi/src/lat/lattice-functions-transition-model.h",
+             ]
+  ),
+  includes = [
+           "include/",
+           "third_party/kaldi/src/",           
+  ],
+  copts = [
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-Wno-unused-local-typedefs",
+        "-Wno-sign-compare",
+  ],
+  linkopts = [
+        "-pthread",
+  ],
+  deps = [
+      "@openfst//:openfst",
+      "@cuda_cublas",
+      "@cuda_cudart",
+      "@cuda_curand",
+      "@cuda_cusparse",
+      "@cuda_nvcc",
+      "@cuda_nvtx",
+      "@cuda_cusolver",
+  ],
+  defines = [
+    # This should actually be defined conditionally only when building in cuda mode.
+    "HAVE_CUDA=1",
+  ]
+  )
+
+cc_binary(
+  name="kaldi_loadable",
+  deps=[":kaldi"],
+  linkopts = [
+        "-Wl,--no-undefined",
+  ],
+  linkshared=True)
+
+cc_library(
+    name = "cuspeech_decoder",
+    srcs = ["src/ctc_transition_information.cc"],
+    hdrs = ["include/riva/asrlib/decoder/ctc_transition_information.h"],
+    includes = ["include/"],
+    deps = [":kaldi"],
+)

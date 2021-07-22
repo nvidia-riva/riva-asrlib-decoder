@@ -1,0 +1,2 @@
+*.fst filter=lfs diff=lfs merge=lfs -text
+*.ark filter=lfs diff=lfs merge=lfs -text
