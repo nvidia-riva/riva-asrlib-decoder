@@ -17,9 +17,7 @@
 import argparse
 import sys
 import tempfile
-
 from distutils.util import strtobool
-
 
 PYNINI_AVAILABLE = False
 PYWRAPFST_AVAILABLE = False
@@ -27,11 +25,13 @@ errors = []
 
 try:
     import pynini as fst
+
     PYNINI_AVAILABLE = True
 except (ModuleNotFoundError, ImportError) as e1:
     errors.append(e1)
     try:
         import pywrapfst as fst
+
         PYWRAPFST_AVAILABLE = True
     except (ModuleNotFoundError, ImportError) as e2:
         errors.append(e2)
@@ -39,30 +39,23 @@ finally:
     if not (PYNINI_AVAILABLE or PYWRAPFST_AVAILABLE):
         raise Exception(errors)
 
+
 def str2bool(value: str) -> bool:
     return bool(strtobool(value))
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="""Add disambig arcs into an input LM.""",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description="""Add disambig arcs into an input LM.""",
     )
     parser.add_argument(
-        "lm_in_path",
-        type=str,
-        help="LM path",
+        "lm_in_path", type=str, help="LM path",
     )
     parser.add_argument(
-        "--lm_out_path",
-        type=str,
-        default="-",
-        help="Out path or stdout",
+        "--lm_out_path", type=str, default="-", help="Out path or stdout",
     )
     parser.add_argument(
-        "--disambig_num",
-        type=int,
-        default=3,
-        help="How many disambiguators to add",
+        "--disambig_num", type=int, default=3, help="How many disambiguators to add",
     )
     parser.add_argument(
         "--shift_labels",

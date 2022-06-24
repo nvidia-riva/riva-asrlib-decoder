@@ -19,11 +19,10 @@ import argparse
 import os
 
 from joblib import Parallel, delayed
-from tqdm.auto import tqdm
-
 from nemo.collections.asr.models import ASRModel
 from nemo.collections.common import tokenizers
 from nemo.utils import logging, model_utils
+from tqdm.auto import tqdm
 
 
 def write_dataset(chunks, path):
@@ -108,9 +107,7 @@ def main():
         help="Path to the text file to tokenize, it can be a plain text file or JSON manifest",
     )
     parser.add_argument(
-        "--tokenizer_dir",
-        type=str,
-        help="The directory path to the tokenizer vocabulary + additional metadata",
+        "--tokenizer_dir", type=str, help="The directory path to the tokenizer vocabulary + additional metadata",
     )
     parser.add_argument(
         "--tokenizer_type",
@@ -119,9 +116,7 @@ def main():
         help="The type of the tokenizer. Currently supports `bpe` and `wpe`",
     )
     parser.add_argument(
-        "--nemo_model",
-        type=str,
-        help="The .nemo model path to extract the tokenizer",
+        "--nemo_model", type=str, help="The .nemo model path to extract the tokenizer",
     )
     parser.add_argument(
         "--output_file", required=True, type=str, help="The path to store the tokenized subwords",

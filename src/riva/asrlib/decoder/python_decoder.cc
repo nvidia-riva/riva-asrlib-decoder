@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -218,14 +218,15 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
         return results;
       });
 
-
   // TODO: Overload decode to accept a DLPack Tensor.
   // pyclass.def(
   //     "decode",
   //     [](PyClass &cuda_pipeline, const DLManagedTensor &logits,
   //        const torch::Tensor &logits_lengths)
-  //         -> std::vector<std::vector<std::tuple<std::string, float, float>>> {
-  //       // contiguousness might not mean what I think it means. It may just mean
+  //         -> std::vector<std::vector<std::tuple<std::string, float, float>>>
+  //         {
+  //       // contiguousness might not mean what I think it means. It may just
+  //       mean
   //       // stride has no padding.
   //         assert(logits.dl_tensor.ndim == 3);
   //         assert(logits.dl_tensor.dtype == kDLFloat);
@@ -236,10 +237,12 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
   //       }
   //       // logits should be batch x time x logits
   //       std::size_t batch_size = logits_lengths.size(0);
-  //       std::vector<std::vector<std::tuple<std::string, float, float>>> results(
+  //       std::vector<std::vector<std::tuple<std::string, float, float>>>
+  //       results(
   //           batch_size);
   //       for (int64_t i = 0; i < logits_lengths.size(0); ++i) {
-  //         // TODO: Check that the logits_lengths tensor actually contains long
+  //         // TODO: Check that the logits_lengths tensor actually contains
+  //         long
   //         // values
   //         std::size_t valid_time_steps =
   //             logits_lengths.index({TensorIndex(i)}).item<long>();
@@ -255,7 +258,8 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
   //                     &asr_results) {
   //               const kaldi::cuda_decoder::CTMResult &ctm_result =
   //                   std::get<1>(asr_results).value();
-  //               for (size_t iword = 0; iword < ctm_result.times_seconds.size();
+  //               for (size_t iword = 0; iword <
+  //               ctm_result.times_seconds.size();
   //                    ++iword) {
   //                 results[i].emplace_back(
   //                     word_syms.Find(ctm_result.words[iword]),
@@ -271,7 +275,6 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
   //       cuda_pipeline.WaitForAllTasks();
   //       return results;
   //     });
-
 }
 } // anonymous namespace
 

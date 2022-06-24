@@ -17,7 +17,6 @@
 import itertools
 import sys
 
-
 if __name__ == "__main__":
     with_sefloops = len(sys.argv) <= 2 or sys.argv[2] != "false"
 
