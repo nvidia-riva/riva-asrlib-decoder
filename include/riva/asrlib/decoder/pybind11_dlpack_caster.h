@@ -18,6 +18,7 @@
 
 #include <dlpack/dlpack.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace pybind11 {
 namespace detail {
