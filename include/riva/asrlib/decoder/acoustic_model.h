@@ -20,24 +20,19 @@ namespace riva::asrlib {
 
 class AcousticModel {
  public:
-  virtual void RunBatch(const std::vector<int> &channels,
-                const std::vector<float *> &d_features,
-                const std::vector<int>& features_strides,
-                        // const std::vector<float *> &d_ivectors,
-                const std::vector<int> &n_input_frames_valid,
-                const std::vector<bool> &is_first_chunk,
-                const std::vector<bool> &is_last_chunk,
-                const float *d_all_log_posteriors,
-                std::vector<std::vector<std::pair<int, const float *>>>
-                    *all_frames_log_posteriors) = 0;
+  virtual void RunBatch(
+      const std::vector<int>& channels, const std::vector<float*>& d_features,
+      const std::vector<int>& features_strides,
+      // const std::vector<float *> &d_ivectors,
+      const std::vector<int>& n_input_frames_valid, const std::vector<bool>& is_first_chunk,
+      const std::vector<bool>& is_last_chunk, const float* d_all_log_posteriors,
+      std::vector<std::vector<std::pair<int, const float*>>>* all_frames_log_posteriors) = 0;
 
   void FormatOutputPtrs(
-      const std::vector<int> &channels,
-      const float *d_all_log_posteriors,
-      std::vector<std::vector<std::pair<int, const float *>>>
-          *all_frames_log_posteriors_ptrs,
-      const std::vector<int> &n_output_frames_valid,
-      const std::vector<int> *n_output_frames_valid_offset = NULL);
+      const std::vector<int>& channels, const float* d_all_log_posteriors,
+      std::vector<std::vector<std::pair<int, const float*>>>* all_frames_log_posteriors_ptrs,
+      const std::vector<int>& n_output_frames_valid,
+      const std::vector<int>* n_output_frames_valid_offset = NULL);
 
   virtual int GetNOutputFramesPerChunk() = 0;
   virtual int GetTotalNnet3RightContext() = 0;

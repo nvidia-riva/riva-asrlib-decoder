@@ -19,21 +19,24 @@
 
 namespace riva::asrlib {
 
-bool cudaCheckError(cudaError_t code, const char* expr, const char* file, int line) {
-    if (code) {
-        printf("CUDA error at %s:%d, code=%d (%s) in '%s'\n", file, line,
-               (int)code, cudaGetErrorString(code), expr);
-        return true;
-    }
-    return false;
+bool
+cudaCheckError(cudaError_t code, const char* expr, const char* file, int line)
+{
+  if (code) {
+    printf(
+        "CUDA error at %s:%d, code=%d (%s) in '%s'\n", file, line, (int)code,
+        cudaGetErrorString(code), expr);
+    return true;
+  }
+  return false;
 }
 
-#define RIVA_ASRLIB_CUDA_CHECK_ERR(...)                                                        \
-    do {                                                                         \
-        bool err = ::riva::asrlib::cudaCheckError(__VA_ARGS__, #__VA_ARGS__, __FILE__, __LINE__); \
-    if (err) {                                                               \
-        exit(1);                                                        \
-    }                                                                        \
-    } while (0)
+#define RIVA_ASRLIB_CUDA_CHECK_ERR(...)                                                       \
+  do {                                                                                        \
+    bool err = ::riva::asrlib::cudaCheckError(__VA_ARGS__, #__VA_ARGS__, __FILE__, __LINE__); \
+    if (err) {                                                                                \
+      exit(1);                                                                                \
+    }                                                                                         \
+  } while (0)
 
 }  // namespace riva::asrlib

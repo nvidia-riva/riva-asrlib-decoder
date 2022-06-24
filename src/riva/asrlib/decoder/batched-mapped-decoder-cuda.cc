@@ -22,33 +22,31 @@ const float kSleepForTaskComplete = 10e-3;
 const float kSleepForNewTask = 100e-6;
 
 BatchedMappedDecoderCuda::BatchedMappedDecoderCuda(
-    const BatchedMappedDecoderCudaConfig &config,
-    const fst::Fst<fst::StdArc> &decode_fst,
-    std::unique_ptr<kaldi::TransitionInformation> &&trans_information,
-    fst::SymbolTable word_syms)
-    : cuda_online_pipeline_(config.online_opts, decode_fst,
-                            std::move(trans_information)),
+    const BatchedMappedDecoderCudaConfig& config, const fst::Fst<fst::StdArc>& decode_fst,
+    std::unique_ptr<kaldi::TransitionInformation>&& trans_information, fst::SymbolTable word_syms)
+    : cuda_online_pipeline_(config.online_opts, decode_fst, std::move(trans_information)),
       threads_running_(true), n_tasks_not_done_(0), corr_id_cnt_(0),
       max_batch_size_(config.online_opts.max_batch_size),
-      n_input_per_chunk_(config.n_input_per_chunk) {
+      n_input_per_chunk_(config.n_input_per_chunk)
+{
   assert(n_input_per_chunk_ > 0 && "n_input_per_chunk must be greater than 0");
-  online_pipeline_control_thread_ =
-      std::thread(&BatchedMappedDecoderCuda::ComputeTasks, this);
+  online_pipeline_control_thread_ = std::thread(&BatchedMappedDecoderCuda::ComputeTasks, this);
   cuda_online_pipeline_.SetSymbolTable(std::move(word_syms));
 }
 
-BatchedMappedDecoderCuda::~BatchedMappedDecoderCuda() {
+BatchedMappedDecoderCuda::~BatchedMappedDecoderCuda()
+{
   threads_running_.store(false);
   online_pipeline_control_thread_.join();
 }
 
-void BatchedMappedDecoderCuda::DecodeWithCallback(
-    const float *d_logits, std::size_t logits_frame_stride,
-    std::size_t logits_n_input_frames_valid,
-    const std::function<
-        void(std::tuple<std::optional<kaldi::CompactLattice>,
-                        std::optional<kaldi::cuda_decoder::CTMResult>> &)>
-        &callback) {
+void
+BatchedMappedDecoderCuda::DecodeWithCallback(
+    const float* d_logits, std::size_t logits_frame_stride, std::size_t logits_n_input_frames_valid,
+    const std::function<void(std::tuple<
+                             std::optional<kaldi::CompactLattice>,
+                             std::optional<kaldi::cuda_decoder::CTMResult>>&)>& callback)
+{
   UtteranceTask task;
   // at 5000 files/s, expected to overflow in ~116 million years
   task.corr_id = corr_id_cnt_.fetch_add(1);
@@ -64,7 +62,9 @@ void BatchedMappedDecoderCuda::DecodeWithCallback(
   }
 }
 
-void BatchedMappedDecoderCuda::AcquireTasks() {
+void
+BatchedMappedDecoderCuda::AcquireTasks()
+{
   std::lock_guard<std::mutex> lk(outstanding_utt_m_);
   while (current_tasks_.size() < max_batch_size_) {
     if (outstanding_utt_q_.empty()) {
@@ -72,19 +72,18 @@ void BatchedMappedDecoderCuda::AcquireTasks() {
       break;
     }
 
-    UtteranceTask &task = outstanding_utt_q_.front();
+    UtteranceTask& task = outstanding_utt_q_.front();
 
     bool was_created = cuda_online_pipeline_.TryInitCorrID(task.corr_id);
     if (!was_created)
       break;
 
-    auto &callback = task.callback;
+    auto& callback = task.callback;
 
     cuda_online_pipeline_.SetLatticeCallback(
-        task.corr_id,
-        [this, callback](
-            std::tuple<std::optional<kaldi::CompactLattice>,
-                       std::optional<kaldi::cuda_decoder::CTMResult>> &result) {
+        task.corr_id, [this, callback](std::tuple<
+                                       std::optional<kaldi::CompactLattice>,
+                                       std::optional<kaldi::cuda_decoder::CTMResult>>& result) {
           if (callback)
             callback(result);
           n_tasks_not_done_.fetch_sub(1, std::memory_order_release);
@@ -94,7 +93,9 @@ void BatchedMappedDecoderCuda::AcquireTasks() {
   }
 }
 
-void BatchedMappedDecoderCuda::ComputeTasks() {
+void
+BatchedMappedDecoderCuda::ComputeTasks()
+{
   // try using a condition variable?
   while (threads_running_.load()) {
     // Is this optimized out?
@@ -108,16 +109,17 @@ void BatchedMappedDecoderCuda::ComputeTasks() {
       BuildBatchFromCurrentTasks();
 
       cuda_online_pipeline_.DecodeBatch(
-          batch_corr_ids_, batch_d_logits_, batch_logits_frame_stride_,
-          batch_n_input_frames_valid_, batch_is_first_chunk_,
-          batch_is_last_chunk_, nullptr);
+          batch_corr_ids_, batch_d_logits_, batch_logits_frame_stride_, batch_n_input_frames_valid_,
+          batch_is_first_chunk_, batch_is_last_chunk_, nullptr);
       // call destructors of completed tasks
       tasks_last_chunk_.clear();
     }
   }
 }
 
-void BatchedMappedDecoderCuda::BuildBatchFromCurrentTasks() {
+void
+BatchedMappedDecoderCuda::BuildBatchFromCurrentTasks()
+{
   batch_corr_ids_.clear();
   batch_d_logits_.clear();
   batch_logits_frame_stride_.clear();
@@ -129,21 +131,19 @@ void BatchedMappedDecoderCuda::BuildBatchFromCurrentTasks() {
     // what happens if someone pushes to the queue while I pop from it?
     // Wait, there are the current tasks, and then there is the queue.
     // Confusing...
-    UtteranceTask &task = current_tasks_[task_id];
+    UtteranceTask& task = current_tasks_[task_id];
     std::int32_t total_n_input = task.logits_n_input_frames_valid;
 
     std::int32_t loglikes_offset = task.loglikes_time_offset;
     std::int32_t loglikes_remaining = total_n_input - loglikes_offset;
-    std::int32_t num_loglikes =
-        std::min(n_input_per_chunk_, loglikes_remaining);
+    std::int32_t num_loglikes = std::min(n_input_per_chunk_, loglikes_remaining);
     assert(num_loglikes > 0);
     bool is_last_chunk = (loglikes_remaining == num_loglikes);
     bool is_first_chunk = (loglikes_offset == 0);
     CorrelationID corr_id = task.corr_id;
 
     batch_corr_ids_.push_back(task.corr_id);
-    batch_d_logits_.push_back(task.d_logits + task.loglikes_time_offset *
-                                                  task.logits_frame_stride);
+    batch_d_logits_.push_back(task.d_logits + task.loglikes_time_offset * task.logits_frame_stride);
     batch_logits_frame_stride_.push_back(task.logits_frame_stride);
     batch_n_input_frames_valid_.push_back(num_loglikes);
     batch_is_last_chunk_.push_back(is_last_chunk);
@@ -171,7 +171,9 @@ void BatchedMappedDecoderCuda::BuildBatchFromCurrentTasks() {
   }
 }
 
-void BatchedMappedDecoderCuda::WaitForAllTasks() {
+void
+BatchedMappedDecoderCuda::WaitForAllTasks()
+{
   // I feel like we should have a condition variable of some sort here...
   while (n_tasks_not_done_.load() != 0) {
     // why not just call join on the one thread?
@@ -179,8 +181,10 @@ void BatchedMappedDecoderCuda::WaitForAllTasks() {
   }
 }
 
-const fst::SymbolTable &BatchedMappedDecoderCuda::GetSymbolTable() const {
+const fst::SymbolTable&
+BatchedMappedDecoderCuda::GetSymbolTable() const
+{
   return cuda_online_pipeline_.GetSymbolTable();
 }
 
-} // end namespace riva::asrlib
+}  // end namespace riva::asrlib

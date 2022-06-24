@@ -36,34 +36,38 @@ const double kSleepForCallBack = 10e-3;
 // BatchedMappedOnlineDecoderCuda
 struct BatchedMappedOnlineDecoderCudaConfig {
   BatchedMappedOnlineDecoderCudaConfig()
-      : max_batch_size(400),
-        num_channels(800),
-        num_post_processing_worker_threads(-1),
-        determinize_lattice(true),
-        num_decoder_copy_threads(2),
-        frame_shift_seconds(std::numeric_limits<float>::max()) {}
-  void Register(kaldi::OptionsItf *po) {
+      : max_batch_size(400), num_channels(800), num_post_processing_worker_threads(-1),
+        determinize_lattice(true), num_decoder_copy_threads(2),
+        frame_shift_seconds(std::numeric_limits<float>::max())
+  {
+  }
+  void Register(kaldi::OptionsItf* po)
+  {
     // equal to num-lanes?
-    po->Register("max-batch-size", &max_batch_size,
-                 "The maximum execution batch size."
-                 " Larger = better throughput, but higher latency.");
-    po->Register("num-channels", &num_channels,
-                 "The number of parallel audio channels. This is the maximum"
-                 " number of parallel audio channels supported by the pipeline."
-                 " This should be larger than max_batch_size.");
-    po->Register("cpu-post-processing-threads",
-                 &num_post_processing_worker_threads,
-                 "The total number of CPU threads launched to process CPU"
-                 " tasks. -1 = use std::hardware_concurrency().");
-    po->Register("determinize-lattice", &determinize_lattice,
-                 "Determinize the lattice before output.");
+    po->Register(
+        "max-batch-size", &max_batch_size,
+        "The maximum execution batch size."
+        " Larger = better throughput, but higher latency.");
+    po->Register(
+        "num-channels", &num_channels,
+        "The number of parallel audio channels. This is the maximum"
+        " number of parallel audio channels supported by the pipeline."
+        " This should be larger than max_batch_size.");
+    po->Register(
+        "cpu-post-processing-threads", &num_post_processing_worker_threads,
+        "The total number of CPU threads launched to process CPU"
+        " tasks. -1 = use std::hardware_concurrency().");
+    po->Register(
+        "determinize-lattice", &determinize_lattice, "Determinize the lattice before output.");
     // why do host to host copies occur again?
-    po->Register("cuda-decoder-copy-threads", &num_decoder_copy_threads,
-                 "Advanced - Number of worker threads used in the"
-                 " decoder for the host to host copies.");
-    po->Register("cuda-decoder-frame-shift-seconds", &frame_shift_seconds,
-                 "The sampling period of log-likelihood vectors output by the "
-                 "acoustic model.");
+    po->Register(
+        "cuda-decoder-copy-threads", &num_decoder_copy_threads,
+        "Advanced - Number of worker threads used in the"
+        " decoder for the host to host copies.");
+    po->Register(
+        "cuda-decoder-frame-shift-seconds", &frame_shift_seconds,
+        "The sampling period of log-likelihood vectors output by the "
+        "acoustic model.");
 
     decoder_opts.Register(po);
     det_opts.Register(po);
@@ -83,7 +87,8 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   fst::DeterminizeLatticePhonePrunedOptions det_opts;
   kaldi::cuda_decoder::LatticePostprocessorConfig lattice_postprocessor_opts;
 
-  void CheckAndFixConfigs() {
+  void CheckAndFixConfigs()
+  {
     KALDI_ASSERT(max_batch_size > 0);
     // Lower bound on nchannels.
     // Using strictly more than max_batch_size because channels are still used
@@ -91,17 +96,15 @@ struct BatchedMappedOnlineDecoderCudaConfig {
     // max_batch_size batches in the meantime
     // Need to do work while latency postprocessing is occurring in order to
     // maximize performance.
- 
+
     // computing 400 * 2 = 800 here...
-    int min_nchannels =
-        max_batch_size * KALDI_CUDA_DECODER_MIN_NCHANNELS_FACTOR;
+    int min_nchannels = max_batch_size * KALDI_CUDA_DECODER_MIN_NCHANNELS_FACTOR;
     num_channels = std::max(num_channels, min_nchannels);
 
     // If not set use number of physical threads
-    num_post_processing_worker_threads =
-        (num_post_processing_worker_threads > 0)
-            ? num_post_processing_worker_threads
-            : std::thread::hardware_concurrency();
+    num_post_processing_worker_threads = (num_post_processing_worker_threads > 0)
+                                             ? num_post_processing_worker_threads
+                                             : std::thread::hardware_concurrency();
     KALDI_ASSERT(frame_shift_seconds != 0.0f);
   }
 };
@@ -109,29 +112,30 @@ struct BatchedMappedOnlineDecoderCudaConfig {
 class BatchedMappedOnlineDecoderCuda {
  public:
   using CorrelationID = uint64_t;
-    using LatticeCallback = std::function<void(std::tuple<std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>> &)>;
+  using LatticeCallback = std::function<void(
+      std::tuple<
+          std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>&)>;
   BatchedMappedOnlineDecoderCuda(
-      const BatchedMappedOnlineDecoderCudaConfig &config,
-      const fst::Fst<fst::StdArc> &decode_fst,
-      std::unique_ptr<kaldi::TransitionInformation> &&trans_information)
-      : config_(config),
-        trans_information_(std::move(trans_information)),
-        partial_hypotheses_(nullptr),
-        end_points_(nullptr),
-        cuda_fst_(std::make_unique<kaldi::cuda_decoder::CudaFst>(
-            decode_fst, trans_information_.get())),
+      const BatchedMappedOnlineDecoderCudaConfig& config, const fst::Fst<fst::StdArc>& decode_fst,
+      std::unique_ptr<kaldi::TransitionInformation>&& trans_information)
+      : config_(config), trans_information_(std::move(trans_information)),
+        partial_hypotheses_(nullptr), end_points_(nullptr),
+        cuda_fst_(
+            std::make_unique<kaldi::cuda_decoder::CudaFst>(decode_fst, trans_information_.get())),
         // cuda_decoder_(std::make_unique<kaldi::cuda_decoder::CudaDecoder>(
         //     *cuda_fst_, config_.decoder_opts,
         //     // here's the bug!
         //     /*nlanes=*/config_.max_batch_size, config_.num_channels)),
-        word_syms_() {
+        word_syms_()
+  {
     config_.CheckAndFixConfigs();
 
     cuda_decoder_ = std::make_unique<kaldi::cuda_decoder::CudaDecoder>(
-            *cuda_fst_, config_.decoder_opts,
-            /*nlanes=*/config_.max_batch_size, config_.num_channels);
+        *cuda_fst_, config_.decoder_opts,
+        /*nlanes=*/config_.max_batch_size, config_.num_channels);
 
-    lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(config_.lattice_postprocessor_opts);
+    lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(
+        config_.lattice_postprocessor_opts);
     lattice_postprocessor_->SetTransitionInformation(trans_information_.get());
     lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
 
@@ -151,12 +155,12 @@ class BatchedMappedOnlineDecoderCuda {
 
     int num_worker_threads = config_.num_post_processing_worker_threads;
     if (num_worker_threads > 0) {
-    thread_pool_ = std::make_unique<kaldi::cuda_decoder::ThreadPoolLight>(
-        num_worker_threads);
+      thread_pool_ = std::make_unique<kaldi::cuda_decoder::ThreadPoolLight>(num_worker_threads);
     }
   }
 
-  ~BatchedMappedOnlineDecoderCuda() {
+  ~BatchedMappedOnlineDecoderCuda()
+  {
     // The destructor races with callback completion. Even if all callbacks have
     // finished, the counter may (non-deterministically) lag behind by a few ms.
     // Deleting the object when all callbacks had been called is UB: the
@@ -164,23 +168,21 @@ class BatchedMappedOnlineDecoderCuda {
     // returned.
     WaitForLatticeCallbacks();
     assert(n_lattice_callbacks_not_done_ == 0);
-    assert(available_channels_.empty() ||
-           available_channels_.size() == config_.num_channels);
+    assert(available_channels_.empty() || available_channels_.size() == config_.num_channels);
   }
 
-  void WaitForLatticeCallbacks() noexcept {
-    while (n_lattice_callbacks_not_done_.load() != 0)
-      kaldi::Sleep(kSleepForCallBack);
+  void WaitForLatticeCallbacks() noexcept
+  {
+    while (n_lattice_callbacks_not_done_.load() != 0) kaldi::Sleep(kSleepForCallBack);
   }
-  void DecodeBatch(const std::vector<CorrelationID> &corr_ids,
-                   const std::vector<const float *> &d_logits,
-                   const std::vector<std::size_t> &logits_frame_stride,
-                   const std::vector<std::size_t> &n_logit_frames_valid,
-                   const std::vector<bool> &is_first_chunk,
-                   // doesn't is_last_chunk depend upon the minimum
-                   // value in n_logit_frames_valid?
-                   const std::vector<bool> &is_last_chunk,
-                   std::vector<int> *channels) {
+  void DecodeBatch(
+      const std::vector<CorrelationID>& corr_ids, const std::vector<const float*>& d_logits,
+      const std::vector<std::size_t>& logits_frame_stride,
+      const std::vector<std::size_t>& n_logit_frames_valid, const std::vector<bool>& is_first_chunk,
+      // doesn't is_last_chunk depend upon the minimum
+      // value in n_logit_frames_valid?
+      const std::vector<bool>& is_last_chunk, std::vector<int>* channels)
+  {
     nvtxRangePushA("DecodeBatch");
     if (channels != nullptr) {
       channels = &channels_;
@@ -190,28 +192,29 @@ class BatchedMappedOnlineDecoderCuda {
 
     std::vector<int> list_channels_first_chunk;
     for (std::size_t i = 0; i < is_first_chunk.size(); ++i) {
-        if (is_first_chunk[i]) {
-            list_channels_first_chunk.push_back(channels_[i]);
-        }
+      if (is_first_chunk[i]) {
+        list_channels_first_chunk.push_back(channels_[i]);
+      }
     }
     if (!list_channels_first_chunk.empty()) {
-        // KALDI_LOG << "GALVEZ:InitDecoding()";
+      // KALDI_LOG << "GALVEZ:InitDecoding()";
       cuda_decoder_->InitDecoding(list_channels_first_chunk);
     }
 
-    std::vector<std::pair<kaldi::cuda_decoder::ChannelId, const float *>>
-        lanes_assignments;
+    std::vector<std::pair<kaldi::cuda_decoder::ChannelId, const float*>> lanes_assignments;
     lanes_assignments.reserve(channels_.size());
-    std::size_t frames_to_decode = *std::max_element(n_logit_frames_valid.begin(), n_logit_frames_valid.end());
+    std::size_t frames_to_decode =
+        *std::max_element(n_logit_frames_valid.begin(), n_logit_frames_valid.end());
     for (std::size_t f = 0; f < frames_to_decode; ++f) {
-        lanes_assignments.clear();
-        for (int32_t ilane = 0; ilane < channels_.size(); ++ilane) {
-            const kaldi::cuda_decoder::ChannelId ichannel = channels_[ilane];
-            if (f < n_logit_frames_valid[ilane]) {
-                lanes_assignments.emplace_back(ichannel, d_logits[ilane] + f * logits_frame_stride[ilane]);
-            }
+      lanes_assignments.clear();
+      for (int32_t ilane = 0; ilane < channels_.size(); ++ilane) {
+        const kaldi::cuda_decoder::ChannelId ichannel = channels_[ilane];
+        if (f < n_logit_frames_valid[ilane]) {
+          lanes_assignments.emplace_back(
+              ichannel, d_logits[ilane] + f * logits_frame_stride[ilane]);
         }
-        cuda_decoder_->AdvanceDecoding(lanes_assignments);
+      }
+      cuda_decoder_->AdvanceDecoding(lanes_assignments);
     }
 
     RunCallbacksAndFinalize(corr_ids, channels_, is_last_chunk);
@@ -220,18 +223,19 @@ class BatchedMappedOnlineDecoderCuda {
 
   // Set the callback function to call with the final lattice for a given
   // corr_id
-  void SetLatticeCallback(CorrelationID corr_id,
-                          const LatticeCallback &callback) {
+  void SetLatticeCallback(CorrelationID corr_id, const LatticeCallback& callback)
+  {
     std::lock_guard<std::mutex> lk(map_callbacks_m_);
     lattice_callbacks_.insert({corr_id, callback});
   }
 
-  void RunCallbacksAndFinalize(const std::vector<CorrelationID> &corr_ids,
-                               const std::vector<int> &channels,
-                               const std::vector<bool> &is_last_chunk) {
-      // KALDI_LOG << "RunCallbacksAndFinalize" << is_last_chunk.size();
+  void RunCallbacksAndFinalize(
+      const std::vector<CorrelationID>& corr_ids, const std::vector<int>& channels,
+      const std::vector<bool>& is_last_chunk)
+  {
+    // KALDI_LOG << "RunCallbacksAndFinalize" << is_last_chunk.size();
     std::vector<kaldi::cuda_decoder::ChannelId> list_channels_last_chunk;
-    std::vector<LatticeCallback *> list_lattice_callbacks_last_chunk;
+    std::vector<LatticeCallback*> list_lattice_callbacks_last_chunk;
     {
       std::lock_guard<std::mutex> lk_callbacks(map_callbacks_m_);
       std::lock_guard<std::mutex> lk_channels(available_channels_m_);
@@ -244,12 +248,11 @@ class BatchedMappedOnlineDecoderCuda {
           decltype(lattice_callbacks_.end()) it_lattice_callback;
           if (!lattice_callbacks_.empty()) {
             it_lattice_callback = lattice_callbacks_.find(corr_id);
-            has_lattice_callback =
-                (it_lattice_callback != lattice_callbacks_.end());
+            has_lattice_callback = (it_lattice_callback != lattice_callbacks_.end());
           }
           if (has_lattice_callback) {
             // const LatticeCallback cannot be meaningfully moved...
-            LatticeCallback *lattice_callback =
+            LatticeCallback* lattice_callback =
                 new LatticeCallback(std::move(it_lattice_callback->second));
             lattice_callbacks_.erase(it_lattice_callback);
             list_channels_last_chunk.push_back(ichannel);
@@ -272,20 +275,21 @@ class BatchedMappedOnlineDecoderCuda {
     // this must finish before ConcurrentGetRawLatticeSingleChannel is called
     // but it clearly does?
     cuda_decoder_->PrepareForGetRawLattice(list_channels_last_chunk, true);
-    n_lattice_callbacks_not_done_.fetch_add(list_channels_last_chunk.size(),
-                                            std::memory_order_acquire);
+    n_lattice_callbacks_not_done_.fetch_add(
+        list_channels_last_chunk.size(), std::memory_order_acquire);
 
     for (std::size_t i = 0; i < list_channels_last_chunk.size(); ++i) {
       uint64_t ichannel = list_channels_last_chunk[i];
-      LatticeCallback *lattice_callback = list_lattice_callbacks_last_chunk[i];
+      LatticeCallback* lattice_callback = list_lattice_callbacks_last_chunk[i];
       thread_pool_->Push(
-          {&BatchedMappedOnlineDecoderCuda::FinalizeDecodingWrapper, this,
-           ichannel, static_cast<void *>(lattice_callback)});
+          {&BatchedMappedOnlineDecoderCuda::FinalizeDecodingWrapper, this, ichannel,
+           static_cast<void*>(lattice_callback)});
     }
   }
 
-  bool TryInitCorrID(CorrelationID corr_id, std::int32_t wait_for_us = 0) {
-      // KALDI_LOG << "GALVEZ:TryInitCorrID";
+  bool TryInitCorrID(CorrelationID corr_id, std::int32_t wait_for_us = 0)
+  {
+    // KALDI_LOG << "GALVEZ:TryInitCorrID";
     bool inserted;
     decltype(corr_id2channel_.end()) it;
     std::tie(it, inserted) = corr_id2channel_.insert({corr_id, -1});
@@ -303,7 +307,8 @@ class BatchedMappedOnlineDecoderCuda {
           waited_for += int32(kSleepForChannelAvailable * 1e6);
           lk.lock();
           channel_available = (available_channels_.size() > 0);
-          if (channel_available) break;
+          if (channel_available)
+            break;
         }
 
         // If still not available return
@@ -327,18 +332,18 @@ class BatchedMappedOnlineDecoderCuda {
     return true;
   }
 
-  void SetSymbolTable(fst::SymbolTable word_syms) {
+  void SetSymbolTable(fst::SymbolTable word_syms)
+  {
     word_syms_ = std::move(word_syms);
     cuda_decoder_->SetSymbolTable(word_syms_);
   }
 
-  const fst::SymbolTable& GetSymbolTable() const {
-    return word_syms_;
-  }
-    
+  const fst::SymbolTable& GetSymbolTable() const { return word_syms_; }
+
 
  private:
-  void FinalizeDecoding(int32 ichannel, const LatticeCallback *callback) {
+  void FinalizeDecoding(int32 ichannel, const LatticeCallback* callback)
+  {
     kaldi::Lattice lat;
     cuda_decoder_->ConcurrentGetRawLatticeSingleChannel(ichannel, &lat);
 
@@ -354,10 +359,9 @@ class BatchedMappedOnlineDecoderCuda {
     if (config_.determinize_lattice) {
       // may *not* determinize the lattice
       fst::DeterminizeLatticePhonePrunedWrapper(
-          *trans_information_, &lat, config_.decoder_opts.lattice_beam, &dlat,
-          config_.det_opts);
+          *trans_information_, &lat, config_.decoder_opts.lattice_beam, &dlat, config_.det_opts);
     } else {
-        //
+      //
       fst::ConvertLattice(lat, &dlat);
     }
 
@@ -368,7 +372,8 @@ class BatchedMappedOnlineDecoderCuda {
     kaldi::cuda_decoder::CTMResult ctm;
     lattice_postprocessor_->GetCTM(dlat, &ctm);
 
-    std::tuple<std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>> result{std::make_optional(clat), std::make_optional(ctm)};
+    std::tuple<std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>
+        result{std::make_optional(clat), std::make_optional(ctm)};
 
     // if ptr set and if callback func callable
     if (callback && *callback) {
@@ -380,17 +385,15 @@ class BatchedMappedOnlineDecoderCuda {
   }
 
   // static wrapper for thread pool
-  static void FinalizeDecodingWrapper(void *obj, uint64_t ichannel64,
-                                      void *callback_ptr) {
+  static void FinalizeDecodingWrapper(void* obj, uint64_t ichannel64, void* callback_ptr)
+  {
     int32 ichannel = static_cast<int32>(ichannel64);
-    const LatticeCallback *callback =
-        static_cast<const LatticeCallback *>(callback_ptr);
-    static_cast<BatchedMappedOnlineDecoderCuda *>(obj)->FinalizeDecoding(
-        ichannel, callback);
+    const LatticeCallback* callback = static_cast<const LatticeCallback*>(callback_ptr);
+    static_cast<BatchedMappedOnlineDecoderCuda*>(obj)->FinalizeDecoding(ichannel, callback);
   }
 
-  void ListIChannelsInBatch(const std::vector<CorrelationID> &corr_ids,
-                            std::vector<int> *channels) {
+  void ListIChannelsInBatch(const std::vector<CorrelationID>& corr_ids, std::vector<int>* channels)
+  {
     channels->clear();
     for (int i = 0; i < corr_ids.size(); ++i) {
       int corr_id = corr_ids[i];
@@ -411,8 +414,8 @@ class BatchedMappedOnlineDecoderCuda {
   std::unordered_map<CorrelationID, int32> corr_id2channel_;
 
   // Where to store partial_hypotheses_ and end_points_ if available
-  std::vector<const std::string *> *partial_hypotheses_;
-  std::vector<bool> *end_points_;
+  std::vector<const std::string*>* partial_hypotheses_;
+  std::vector<bool>* end_points_;
 
   // The callback is called once the final lattice is ready
   std::unordered_map<CorrelationID, const LatticeCallback> lattice_callbacks_;
@@ -422,7 +425,7 @@ class BatchedMappedOnlineDecoderCuda {
 
   std::vector<int> n_input_frames_valid_;
 
-  std::vector<std::vector<std::pair<int, float *>>> all_frames_log_posteriors_;
+  std::vector<std::vector<std::pair<int, float*>>> all_frames_log_posteriors_;
 
   // Parameters extracted from the models
   int input_frames_per_chunk_;

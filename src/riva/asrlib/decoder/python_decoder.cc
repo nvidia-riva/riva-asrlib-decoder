@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 #include <pybind11/pybind11.h>
+
 #include <stdexcept>
 
 #include "riva/asrlib/decoder/batched-mapped-decoder-cuda.h"
@@ -27,22 +28,25 @@ using namespace pybind11::literals;
 
 namespace {
 
-void PybindOnlineEndpointRule(py::module &m) {
+void
+PybindOnlineEndpointRule(py::module& m)
+{
   using PyClass = kaldi::OnlineEndpointRule;
   py::class_<PyClass> pyclass(m, "OnlineEndpointRule");
-  pyclass.def(py::init<bool, float, float, float>(),
-              "must_contain_nonsilence"_a = true,
-              "min_trailing_silence"_a = 1.0,
-              "max_relative_cost"_a = std::numeric_limits<float>::infinity(),
-              "min_utterance_length"_a = 0.0);
-  pyclass.def_readwrite("must_contain_nonsilence",
-                        &PyClass::must_contain_nonsilence);
+  pyclass.def(
+      py::init<bool, float, float, float>(), "must_contain_nonsilence"_a = true,
+      "min_trailing_silence"_a = 1.0,
+      "max_relative_cost"_a = std::numeric_limits<float>::infinity(),
+      "min_utterance_length"_a = 0.0);
+  pyclass.def_readwrite("must_contain_nonsilence", &PyClass::must_contain_nonsilence);
   pyclass.def_readwrite("min_trailing_silence", &PyClass::min_trailing_silence);
   pyclass.def_readwrite("max_relative_cost", &PyClass::max_relative_cost);
   pyclass.def_readwrite("min_utterance_length", &PyClass::min_utterance_length);
 }
 
-void PybindOnlineEndpointConfig(py::module &m) {
+void
+PybindOnlineEndpointConfig(py::module& m)
+{
   using PyClass = kaldi::OnlineEndpointConfig;
   py::class_<PyClass> pyclass(m, "OnlineEndpointConfig");
   pyclass.def(py::init<>());
@@ -54,21 +58,24 @@ void PybindOnlineEndpointConfig(py::module &m) {
   pyclass.def_readwrite("rule5", &PyClass::rule5);
 }
 
-void PybindCudaDecoderConfig(py::module &m) {
+void
+PybindCudaDecoderConfig(py::module& m)
+{
   using PyClass = kaldi::cuda_decoder::CudaDecoderConfig;
   py::class_<PyClass> pyclass(m, "CudaDecoderConfig");
   pyclass.def(py::init<>());
   pyclass.def_readwrite("default_beam", &PyClass::default_beam);
   pyclass.def_readwrite("lattice_beam", &PyClass::lattice_beam);
-  pyclass.def_readwrite("ntokens_pre_allocated",
-                        &PyClass::ntokens_pre_allocated);
+  pyclass.def_readwrite("ntokens_pre_allocated", &PyClass::ntokens_pre_allocated);
   pyclass.def_readwrite("main_q_capacity", &PyClass::main_q_capacity);
   pyclass.def_readwrite("aux_q_capacity", &PyClass::aux_q_capacity);
   pyclass.def_readwrite("max_active", &PyClass::max_active);
   pyclass.def_readwrite("endpointing_config", &PyClass::endpointing_config);
 }
 
-void PybindDeterminizeLatticePhonePrunedOptions(py::module &m) {
+void
+PybindDeterminizeLatticePhonePrunedOptions(py::module& m)
+{
   using PyClass = fst::DeterminizeLatticePhonePrunedOptions;
   py::class_<PyClass> pyclass(m, "DeterminizeLatticePhonePrunedOptions");
   pyclass.def(py::init<>());
@@ -79,7 +86,9 @@ void PybindDeterminizeLatticePhonePrunedOptions(py::module &m) {
   pyclass.def_readwrite("minimize", &PyClass::minimize);
 }
 
-void PybindMinimumBayesRiskOptions(py::module &m) {
+void
+PybindMinimumBayesRiskOptions(py::module& m)
+{
   using PyClass = kaldi::MinimumBayesRiskOptions;
   py::class_<PyClass> pyclass(m, "MinimumBayesRiskOptions");
   pyclass.def(py::init<>());
@@ -87,7 +96,9 @@ void PybindMinimumBayesRiskOptions(py::module &m) {
   pyclass.def_readwrite("print_silence", &PyClass::print_silence);
 }
 
-void PybindWordBoundaryInfoNewOpts(py::module &m) {
+void
+PybindWordBoundaryInfoNewOpts(py::module& m)
+{
   using PyClass = kaldi::WordBoundaryInfoNewOpts;
   py::class_<PyClass> pyclass(m, "WordBoundaryInfoNewOpts");
   pyclass.def(py::init<>());
@@ -96,12 +107,13 @@ void PybindWordBoundaryInfoNewOpts(py::module &m) {
   pyclass.def_readwrite("reorder", &PyClass::reorder);
 }
 
-void PybindLatticePostprocessorConfig(py::module &m) {
+void
+PybindLatticePostprocessorConfig(py::module& m)
+{
   using PyClass = kaldi::cuda_decoder::LatticePostprocessorConfig;
   py::class_<PyClass> pyclass(m, "LatticePostprocessorConfig");
   pyclass.def(py::init<>());
-  pyclass.def_readwrite("word_boundary_rxfilename",
-                        &PyClass::word_boundary_rxfilename);
+  pyclass.def_readwrite("word_boundary_rxfilename", &PyClass::word_boundary_rxfilename);
   pyclass.def_readwrite("mbr_opts", &PyClass::mbr_opts);
   pyclass.def_readwrite("wip_opts", &PyClass::wip_opts);
   pyclass.def_readwrite("max_expand", &PyClass::max_expand);
@@ -112,25 +124,27 @@ void PybindLatticePostprocessorConfig(py::module &m) {
   pyclass.def_readwrite("word_ins_penalty", &PyClass::word_ins_penalty);
 }
 
-void PybindBatchedMappedOnlineDecoderCudaConfig(py::module &m) {
+void
+PybindBatchedMappedOnlineDecoderCudaConfig(py::module& m)
+{
   using PyClass = riva::asrlib::BatchedMappedOnlineDecoderCudaConfig;
   py::class_<PyClass> pyclass(m, "BatchedMappedOnlineDecoderCudaConfig");
   pyclass.def(py::init<>());
   pyclass.def_readwrite("max_batch_size", &PyClass::max_batch_size);
   pyclass.def_readwrite("num_channels", &PyClass::num_channels);
-  pyclass.def_readwrite("num_post_processing_worker_threads",
-                        &PyClass::num_post_processing_worker_threads);
+  pyclass.def_readwrite(
+      "num_post_processing_worker_threads", &PyClass::num_post_processing_worker_threads);
   pyclass.def_readwrite("determinize_lattice", &PyClass::determinize_lattice);
-  pyclass.def_readwrite("num_decoder_copy_threads",
-                        &PyClass::num_decoder_copy_threads);
+  pyclass.def_readwrite("num_decoder_copy_threads", &PyClass::num_decoder_copy_threads);
   pyclass.def_readwrite("frame_shift_seconds", &PyClass::frame_shift_seconds);
   pyclass.def_readwrite("decoder_opts", &PyClass::decoder_opts);
   pyclass.def_readwrite("det_opts", &PyClass::det_opts);
-  pyclass.def_readwrite("lattice_postprocessor_opts",
-                        &PyClass::lattice_postprocessor_opts);
+  pyclass.def_readwrite("lattice_postprocessor_opts", &PyClass::lattice_postprocessor_opts);
 }
 
-int64_t stride(const DLTensor &tensor, const std::size_t dim) {
+int64_t
+stride(const DLTensor& tensor, const std::size_t dim)
+{
   if (tensor.strides != nullptr) {
     return tensor.strides[dim];
   } else {
@@ -143,25 +157,33 @@ int64_t stride(const DLTensor &tensor, const std::size_t dim) {
 }
 
 template <typename T>
-const T *address(const DLTensor &tensor, std::size_t index0,
-                 std::size_t index1) {
-  return reinterpret_cast<const T *>(
-             reinterpret_cast<const char *>(tensor.data) + tensor.byte_offset) +
+const T*
+address(const DLTensor& tensor, std::size_t index0, std::size_t index1)
+{
+  return reinterpret_cast<const T*>(
+             reinterpret_cast<const char*>(tensor.data) + tensor.byte_offset) +
          index0 * stride(tensor, 0) + index1 * stride(tensor, 1);
 }
 
 template <typename T>
-const T *address(const DLTensor &tensor, std::size_t index) {
-  return reinterpret_cast<const T *>(
-             reinterpret_cast<const char *>(tensor.data) + tensor.byte_offset) +
+const T*
+address(const DLTensor& tensor, std::size_t index)
+{
+  return reinterpret_cast<const T*>(
+             reinterpret_cast<const char*>(tensor.data) + tensor.byte_offset) +
          index;
 }
 
-template <typename T> T index(const DLTensor &tensor, std::size_t index) {
+template <typename T>
+T
+index(const DLTensor& tensor, std::size_t index)
+{
   return *address<T>(tensor, index);
 }
 
-void PybindBatchedMappedDecoderCudaConfig(py::module &m) {
+void
+PybindBatchedMappedDecoderCudaConfig(py::module& m)
+{
   using PyClass = riva::asrlib::BatchedMappedDecoderCudaConfig;
   py::class_<PyClass> pyclass(m, "BatchedMappedDecoderCudaConfig");
   pyclass.def(py::init<>());
@@ -169,7 +191,9 @@ void PybindBatchedMappedDecoderCudaConfig(py::module &m) {
   pyclass.def_readwrite("n_input_per_chunk", &PyClass::n_input_per_chunk);
 }
 
-void PybindBatchedMappedDecoderCuda(py::module &m) {
+void
+PybindBatchedMappedDecoderCuda(py::module& m)
+{
   using PyClass = riva::asrlib::BatchedMappedDecoderCuda;
   py::class_<PyClass> pyclass(m, "BatchedMappedDecoderCuda");
   // Need to wrap fsts somehow, or make the user provide paths to them on disk.
@@ -179,30 +203,26 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
   // pyclass.def(py::init<const BatchedMappedDecoderCudaConfig&,
   //                      const fst::Fst<fst::StdArc>&,
   //                      std::unique_ptr<kaldi::TransitionInformation> &&>());
-  pyclass.def(
-      py::init([](const riva::asrlib::BatchedMappedDecoderCudaConfig &config,
-                  const std::string &wfst_path_on_disk,
-                  const std::string &symbol_table_path_on_disk,
-                  int num_tokens_including_blank) {
-        std::unique_ptr<kaldi::TransitionInformation> trans_info =
-            std::make_unique<riva::asrlib::CTCTransitionInformation>(
-                num_tokens_including_blank);
-        std::unique_ptr<fst::Fst<fst::StdArc>> decode_fst =
-            std::unique_ptr<fst::Fst<fst::StdArc>>(
-                fst::ReadFstKaldiGeneric(wfst_path_on_disk));
+  pyclass.def(py::init([](const riva::asrlib::BatchedMappedDecoderCudaConfig& config,
+                          const std::string& wfst_path_on_disk,
+                          const std::string& symbol_table_path_on_disk,
+                          int num_tokens_including_blank) {
+    std::unique_ptr<kaldi::TransitionInformation> trans_info =
+        std::make_unique<riva::asrlib::CTCTransitionInformation>(num_tokens_including_blank);
+    std::unique_ptr<fst::Fst<fst::StdArc>> decode_fst =
+        std::unique_ptr<fst::Fst<fst::StdArc>>(fst::ReadFstKaldiGeneric(wfst_path_on_disk));
 
-        auto word_syms = std::unique_ptr<fst::SymbolTable>(
-            fst::SymbolTable::ReadText(symbol_table_path_on_disk));
+    auto word_syms =
+        std::unique_ptr<fst::SymbolTable>(fst::SymbolTable::ReadText(symbol_table_path_on_disk));
 
-        auto decoder =
-            new PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
-        return decoder;
-      }));
+    auto decoder = new PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
+    return decoder;
+  }));
 
   pyclass.def(
       "decode",
-      [](PyClass &cuda_pipeline, const DLManagedTensor *managed_logits,
-         const DLManagedTensor *managed_logits_lengths)
+      [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
+         const DLManagedTensor* managed_logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float>>> {
         // contiguousness might not mean what I think it means. It may just mean
         // stride has no padding.
@@ -210,13 +230,12 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
         // I need to set the DLManagedTensor's capsule name to
         // "used_dltensor" somehow... pybind11 does not expose that
         // though...
-        const DLTensor &logits = managed_logits->dl_tensor;
-        const DLTensor &logits_lengths = managed_logits_lengths->dl_tensor;
+        const DLTensor& logits = managed_logits->dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
         if (logits.ndim != 3) {
           throw std::invalid_argument("Expected a 3D logits tensor");
         }
-        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 ||
-            logits.dtype.lanes != 1) {
+        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
           throw std::invalid_argument("Expected a float32 logits tensor");
         }
         // TODO: Consider setting device id based on this... Could use RAII like
@@ -227,35 +246,30 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
         if (logits_lengths.ndim != 1) {
           throw std::invalid_argument("Expected a 1D logits lengths tensor");
         }
-        if (logits_lengths.dtype.code != kDLInt ||
-            logits_lengths.dtype.bits != 64 ||
+        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
             logits_lengths.dtype.lanes != 1) {
-          throw std::invalid_argument(
-              "Expected a 64-bit signed integer logits lengths tensor");
+          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
         }
         if (logits_lengths.device.device_type != kDLCPU) {
           throw std::invalid_argument("Expected lengths tensor to be on CPU");
         }
         // logits should be batch x time x logits
         int64_t batch_size = logits_lengths.shape[0];
-        std::vector<std::vector<std::tuple<std::string, float, float>>> results(
-            batch_size);
+        std::vector<std::vector<std::tuple<std::string, float, float>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
 
-          const float *single_sample_logits_start = address<float>(logits, i);
+          const float* single_sample_logits_start = address<float>(logits, i);
           // number of rows is number of frames
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
           auto place_results =
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
-                  std::tuple<std::optional<kaldi::CompactLattice>,
-                             std::optional<kaldi::cuda_decoder::CTMResult>>
-                      &asr_results) {
-                const kaldi::cuda_decoder::CTMResult &ctm_result =
-                    std::get<1>(asr_results).value();
-                for (size_t iword = 0; iword < ctm_result.times_seconds.size();
-                     ++iword) {
+                  std::tuple<
+                      std::optional<kaldi::CompactLattice>,
+                      std::optional<kaldi::cuda_decoder::CTMResult>>& asr_results) {
+                const kaldi::cuda_decoder::CTMResult& ctm_result = std::get<1>(asr_results).value();
+                for (size_t iword = 0; iword < ctm_result.times_seconds.size(); ++iword) {
                   results[i].emplace_back(
                       word_syms.Find(ctm_result.words[iword]),
                       ctm_result.times_seconds[iword].first,
@@ -275,9 +289,10 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
         return results;
       });
 }
-} // anonymous namespace
+}  // anonymous namespace
 
-PYBIND11_MODULE(python_decoder, m) {
+PYBIND11_MODULE(python_decoder, m)
+{
   m.doc() = "pybind11 bindings for the CUDA WFST decoder";
 
   PybindOnlineEndpointRule(m);
