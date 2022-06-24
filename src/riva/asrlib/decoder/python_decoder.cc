@@ -16,15 +16,14 @@
  */
 #include <pybind11/pybind11.h>
 #include <stdexcept>
-#include <torch/extension.h>
 
 #include "riva/asrlib/decoder/batched-mapped-decoder-cuda.h"
 #include "riva/asrlib/decoder/ctc_transition_information.h"
+#include "riva/asrlib/decoder/pybind11_dlpack_caster.h"
 
 namespace py = pybind11;
 
 using namespace pybind11::literals;
-using namespace torch::indexing;
 
 namespace {
 
@@ -131,6 +130,37 @@ void PybindBatchedMappedOnlineDecoderCudaConfig(py::module &m) {
                         &PyClass::lattice_postprocessor_opts);
 }
 
+int64_t stride(const DLTensor &tensor, const std::size_t dim) {
+  if (tensor.strides != nullptr) {
+    return tensor.strides[dim];
+  } else {
+    int64_t result = 1;
+    for (int32_t iter_dim = tensor.ndim - 1; iter_dim > dim; --iter_dim) {
+      result *= tensor.shape[iter_dim];
+    }
+    return result;
+  }
+}
+
+template <typename T>
+const T *address(const DLTensor &tensor, std::size_t index0,
+                 std::size_t index1) {
+  return reinterpret_cast<const T *>(
+             reinterpret_cast<const char *>(tensor.data) + tensor.byte_offset) +
+         index0 * stride(tensor, 0) + index1 * stride(tensor, 1);
+}
+
+template <typename T>
+const T *address(const DLTensor &tensor, std::size_t index) {
+  return reinterpret_cast<const T *>(
+             reinterpret_cast<const char *>(tensor.data) + tensor.byte_offset) +
+         index;
+}
+
+template <typename T> T index(const DLTensor &tensor, std::size_t index) {
+  return *address<T>(tensor, index);
+}
+
 void PybindBatchedMappedDecoderCudaConfig(py::module &m) {
   using PyClass = riva::asrlib::BatchedMappedDecoderCudaConfig;
   py::class_<PyClass> pyclass(m, "BatchedMappedDecoderCudaConfig");
@@ -168,29 +198,52 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
             new PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
         return decoder;
       }));
+
   pyclass.def(
       "decode",
-      [](PyClass &cuda_pipeline, const torch::Tensor &logits,
-         const torch::Tensor &logits_lengths)
+      [](PyClass &cuda_pipeline, const DLManagedTensor *managed_logits,
+         const DLManagedTensor *managed_logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float>>> {
         // contiguousness might not mean what I think it means. It may just mean
         // stride has no padding.
-        if (!logits.is_contiguous() ||
-            logits.scalar_type() != torch::ScalarType::Float ||
-            logits_lengths.scalar_type() != torch::ScalarType::Long) {
-          throw std::invalid_argument("Invalid input tensors");
+
+        // I need to set the DLManagedTensor's capsule name to
+        // "used_dltensor" somehow... pybind11 does not expose that
+        // though...
+        const DLTensor &logits = managed_logits->dl_tensor;
+        const DLTensor &logits_lengths = managed_logits_lengths->dl_tensor;
+        if (logits.ndim != 3) {
+          throw std::invalid_argument("Expected a 3D logits tensor");
+        }
+        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 ||
+            logits.dtype.lanes != 1) {
+          throw std::invalid_argument("Expected a float32 logits tensor");
+        }
+        // TODO: Consider setting device id based on this... Could use RAII like
+        // in K2 for that.
+        if (logits.device.device_type != kDLCUDA) {
+          throw std::invalid_argument("Expected logits tensor to be on GPU");
+        }
+        if (logits_lengths.ndim != 1) {
+          throw std::invalid_argument("Expected a 1D logits lengths tensor");
+        }
+        if (logits_lengths.dtype.code != kDLInt ||
+            logits_lengths.dtype.bits != 64 ||
+            logits_lengths.dtype.lanes != 1) {
+          throw std::invalid_argument(
+              "Expected a 64-bit signed integer logits lengths tensor");
+        }
+        if (logits_lengths.device.device_type != kDLCPU) {
+          throw std::invalid_argument("Expected lengths tensor to be on CPU");
         }
         // logits should be batch x time x logits
-        std::size_t batch_size = logits_lengths.size(0);
+        int64_t batch_size = logits_lengths.shape[0];
         std::vector<std::vector<std::tuple<std::string, float, float>>> results(
             batch_size);
-        for (int64_t i = 0; i < logits_lengths.size(0); ++i) {
-          // TODO: Check that the logits_lengths tensor actually contains long
-          // values
-          std::size_t valid_time_steps =
-              logits_lengths.index({TensorIndex(i)}).item<long>();
-          torch::Tensor single_sample_logits =
-              logits.index({i, Slice(None, valid_time_steps), "..."});
+        for (int64_t i = 0; i < batch_size; ++i) {
+          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
+
+          const float *single_sample_logits_start = address<float>(logits, i);
           // number of rows is number of frames
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
@@ -210,71 +263,17 @@ void PybindBatchedMappedDecoderCuda(py::module &m) {
                 }
               };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits.data_ptr<float>(),
-              single_sample_logits.stride(1), single_sample_logits.size(0),
+              single_sample_logits_start,
+              // single_sample_logits.data_ptr<float>(),
+              stride(logits, 1),
+              // single_sample_logits.stride(1),
+              index<int64_t>(logits_lengths, i),
+              // size(0)
               place_results);
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
       });
-
-  // TODO: Overload decode to accept a DLPack Tensor.
-  // pyclass.def(
-  //     "decode",
-  //     [](PyClass &cuda_pipeline, const DLManagedTensor &logits,
-  //        const torch::Tensor &logits_lengths)
-  //         -> std::vector<std::vector<std::tuple<std::string, float, float>>>
-  //         {
-  //       // contiguousness might not mean what I think it means. It may just
-  //       mean
-  //       // stride has no padding.
-  //         assert(logits.dl_tensor.ndim == 3);
-  //         assert(logits.dl_tensor.dtype == kDLFloat);
-  //       if (!logits.is_contiguous() ||
-  //           logits.scalar_type() != torch::ScalarType::Float ||
-  //           logits_lengths.scalar_type() != torch::ScalarType::Long) {
-  //         throw std::invalid_argument("Invalid input tensors");
-  //       }
-  //       // logits should be batch x time x logits
-  //       std::size_t batch_size = logits_lengths.size(0);
-  //       std::vector<std::vector<std::tuple<std::string, float, float>>>
-  //       results(
-  //           batch_size);
-  //       for (int64_t i = 0; i < logits_lengths.size(0); ++i) {
-  //         // TODO: Check that the logits_lengths tensor actually contains
-  //         long
-  //         // values
-  //         std::size_t valid_time_steps =
-  //             logits_lengths.index({TensorIndex(i)}).item<long>();
-  //         torch::Tensor single_sample_logits =
-  //             logits.index({i, Slice(None, valid_time_steps), "..."});
-  //         // number of rows is number of frames
-  //         // number of cols is number of logits
-  //         // stride of each row is stride. Always greater than number of cols
-  //         auto place_results =
-  //             [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
-  //                 std::tuple<std::optional<kaldi::CompactLattice>,
-  //                            std::optional<kaldi::cuda_decoder::CTMResult>>
-  //                     &asr_results) {
-  //               const kaldi::cuda_decoder::CTMResult &ctm_result =
-  //                   std::get<1>(asr_results).value();
-  //               for (size_t iword = 0; iword <
-  //               ctm_result.times_seconds.size();
-  //                    ++iword) {
-  //                 results[i].emplace_back(
-  //                     word_syms.Find(ctm_result.words[iword]),
-  //                     ctm_result.times_seconds[iword].first,
-  //                     ctm_result.times_seconds[iword].second);
-  //               }
-  //             };
-  //         cuda_pipeline.DecodeWithCallback(
-  //             single_sample_logits.data_ptr<float>(),
-  //             single_sample_logits.stride(1), single_sample_logits.size(0),
-  //             place_results);
-  //       }
-  //       cuda_pipeline.WaitForAllTasks();
-  //       return results;
-  //     });
 }
 } // anonymous namespace
 

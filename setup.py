@@ -16,7 +16,6 @@
 import glob
 import os
 import shutil
-import torch
 
 import setuptools
 
@@ -48,7 +47,6 @@ class BuildExtension(build_ext):
         if cmake_args == '':
             cmake_args = '-DCMAKE_BUILD_TYPE=Release'
 
-        cmake_args += f" -DCMAKE_PREFIX_PATH={torch.utils.cmake_prefix_path} "
         cmake_args += " -DRIVA_ASRLIB_BUILD_PYTHON_BINDINGS=ON "
 
         if (
@@ -129,12 +127,12 @@ setuptools.setup(
     # scripts=(glob.glob("scripts/prepare_TLG_fst/**/*.py") +
     #          glob.glob("scripts/prepare_TLG_fst/**/*.sh")),
     include_package_data=True,
-    install_requires=["sentencepiece", "cmake", "torch"],
+    install_requires=["sentencepiece", "cmake"],
     extras_require={
         'testing': [
             "kaldi-io",
             "more-itertools",
-            "nemo_toolkit[asr]"
+            "nemo_toolkit[asr]",
         ]
     },
     zip_safe=False,

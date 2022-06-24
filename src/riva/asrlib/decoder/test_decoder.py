@@ -49,7 +49,7 @@ class DecoderTest(unittest.TestCase):
             config, str(test_data_dir / "TLG.fst"), str(test_data_dir / "words.txt"), num_tokens_including_blank
         )
 
-        for batch in more_itertools.chunked(kaldi_io.read_mat_ark(logits_ark), config.online_opts.max_batch_size):
+        for batch in more_itertools.chunked(kaldi_io.read_mat_ark(logits_ark), 1):
             sequences = []
             sequence_lengths = []
             for key, matrix in batch:
@@ -57,5 +57,6 @@ class DecoderTest(unittest.TestCase):
                 sequence_lengths.append(matrix.shape[0])
             padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
+            
             for result in decoder.decode(padded_sequence, sequence_lengths_tensor):
                 print(result)

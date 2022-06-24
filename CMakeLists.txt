@@ -19,7 +19,7 @@ project(riva_asrlib LANGUAGES CUDA CXX)
 
 include(FetchContent)
 
-option(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS "Whether to build python bindings. Requires pytorch" ON)
+option(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS "Whether to build python bindings." ON)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -38,19 +38,6 @@ if(CCACHE_FOUND)
 endif(CCACHE_FOUND)
 
 find_package(CUDAToolkit)
-
-if(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
-  # execute_process(
-  # COMMAND "${PYTHON_EXECUTABLE}" -c "import os; import torch; print(os.path.dirname(torch.__file__))"
-  # OUTPUT_STRIP_TRAILING_WHITESPACE
-  # OUTPUT_VARIABLE Torch_DIR
-  # )
-
-  # list(APPEND CMAKE_PREFIX_PATH "${Torch_DIR}")
-  find_package(Torch REQUIRED)
-  # In particular, we want to make everything here use the same std::string ABI.
-  add_compile_options(${TORCH_CXX_FLAGS})
-endif(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
 
 FetchContent_Declare(openfst
   URL http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.7.2.tar.gz
@@ -216,12 +203,7 @@ target_link_libraries(arpa-to-const-arpa riva_asrlib_wfst_decoder)
 
 if (RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
   add_subdirectory(third_party/pybind11)
-  # https://github.com/pytorch/pytorch/issues/38122#issuecomment-694203281
-  find_library(TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib")
-  message(STATUS "TORCH_PYTHON_LIBRARY: ${TORCH_PYTHON_LIBRARY}")
-
+  add_subdirectory(third_party/dlpack)
   pybind11_add_module(python_decoder src/riva/asrlib/decoder/python_decoder.cc)
-  target_link_libraries(python_decoder PUBLIC riva_asrlib_wfst_decoder torch ${TORCH_PYTHON_LIBRARY})
-  
-
+  target_link_libraries(python_decoder PUBLIC riva_asrlib_wfst_decoder dlpack)
 endif(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
