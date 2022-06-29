@@ -45,6 +45,7 @@ class DecoderTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
+        config.online_opts.lattice_postprocessor_opts.max_expand = 10
         decoder = BatchedMappedDecoderCuda(
             config, str(test_data_dir / "TLG.fst"), str(test_data_dir / "words.txt"), num_tokens_including_blank
         )

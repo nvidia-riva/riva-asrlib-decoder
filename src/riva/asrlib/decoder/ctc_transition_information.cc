@@ -86,7 +86,7 @@ CTCTransitionInformation::TransitionIdIsStartOfPhone(int32_t trans_id) const
 int32
 CTCTransitionInformation::TransitionIdToPhone(int32 trans_id) const
 {
-  return TransitionIdToPdf(trans_id);
+  return trans_id;
 }
 
 bool
