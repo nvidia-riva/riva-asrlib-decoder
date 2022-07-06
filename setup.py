@@ -67,9 +67,9 @@ class BuildExtension(build_ext):
         build_cmd = f'''
         cd {self.build_temp}
         
-        cmake {cmake_args} {riva_asrlib_decoder_dir}
+        cmake -GNinja {cmake_args} {riva_asrlib_decoder_dir}
 
-        make {make_args} python_decoder {' '.join(fst_binaries)}
+        cmake --build . -- {make_args} python_decoder {' '.join(fst_binaries)} offline-cuda-decode-binary
         '''
         print(f'build command is:\n{build_cmd}')
 
@@ -127,7 +127,7 @@ setuptools.setup(
     # scripts=(glob.glob("scripts/prepare_TLG_fst/**/*.py") +
     #          glob.glob("scripts/prepare_TLG_fst/**/*.sh")),
     include_package_data=True,
-    install_requires=["sentencepiece", "cmake"],
+    install_requires=["sentencepiece", "cmake", "ninja",],
     extras_require={
         'testing': [
             "kaldi-io",
