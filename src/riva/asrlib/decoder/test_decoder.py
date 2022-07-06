@@ -15,17 +15,31 @@
 import itertools
 import os
 import pathlib
+import shutil
+import tempfile
 import unittest
+import urllib
 
 import kaldi_io
 import more_itertools
 import torch
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
+def download_test_data(output_dir: pathlib.Path):
+    for file_name in ["logits.ark", "TLG.fst"]:
+        url = "https://riva-asrlib-decoder-assets.s3.us-east-2.amazonaws.com/" + file_name
+        output_path = os.path.join(output_dir, file_name)
+        with urllib.request.urlopen(url) as response:
+            if os.path.exists(output_path):
+                continue
+            with open(output_path, "w") as fh:
+                shutil.copyfileobj(response, fh)
+
 
 class DecoderTest(unittest.TestCase):
     def test_decoder(self):
         test_data_dir = pathlib.Path(__file__).parent.resolve() / "test_data"
+        download_test_data(test_data_dir)
 
         logits_ark = str("ark:" / test_data_dir / "logits.ark")
 
