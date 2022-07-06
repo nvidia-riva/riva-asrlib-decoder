@@ -29,10 +29,10 @@ def download_test_data(output_dir: pathlib.Path):
     for file_name in ["logits.ark", "TLG.fst"]:
         url = "https://riva-asrlib-decoder-assets.s3.us-east-2.amazonaws.com/" + file_name
         output_path = os.path.join(output_dir, file_name)
+        if os.path.exists(output_path):
+            continue
         with urllib.request.urlopen(url) as response:
-            if os.path.exists(output_path):
-                continue
-            with open(output_path, "w") as fh:
+            with open(output_path, "wb") as fh:
                 shutil.copyfileobj(response, fh)
 
 
