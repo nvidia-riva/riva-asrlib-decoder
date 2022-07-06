@@ -259,7 +259,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
 
-          const float* single_sample_logits_start = address<float>(logits, i);
+          // this may not be right... Yes, it seems quite wrong...
+          const float* single_sample_logits_start = address<float>(logits, i, 0);
           // number of rows is number of frames
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
