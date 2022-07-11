@@ -128,6 +128,13 @@ cat $tmpdir/lexiconp.txt | awk '{print $1}' | sort | uniq | awk '
 cat $dir/phones/align_lexicon.txt | sym2int.pl -f 3- $dir/tokens.txt | \
   sym2int.pl -f 1-2 $dir/words.txt > $dir/phones/align_lexicon.int
 
+num_phones=$(wc -l < $dir/units.txt)
+((num_phones+=1))
+rm -f $dir/phones/word_boundary.int
+for x in $(seq 1 $num_phones); do
+  echo "$x singleton" >> $dir/phones/word_boundary.int
+done
+
 # Now compile the lexicon FST. Depending on the size of your lexicon, it may take some time. 
 token_disambig_symbol=`grep \#0 $dir/tokens.txt | awk '{print $2}'`
 word_disambig_symbol=`grep \#0 $dir/words.txt | awk '{print $2}'`

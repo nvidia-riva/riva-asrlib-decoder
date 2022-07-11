@@ -151,11 +151,7 @@ def main():
         tokenizer = asr_model.tokenizer
 
     inv_vocabulary = ['' for i in range(tokenizer.vocab_size)]
-    print("GALVEZ:size=", tokenizer.vocab_size)
     for key, value in tokenizer.tokenizer.get_vocab().items():
-        print("GALVEZ:key=", key)
-        print("GALVEZ:value=", value)
-        # TODO: make unk token configurable?
         inv_vocabulary[value - 1] = '[UNK]' if key == '<unk>' else key
     setattr(tokenizer, "inv_vocabulary", inv_vocabulary)
 

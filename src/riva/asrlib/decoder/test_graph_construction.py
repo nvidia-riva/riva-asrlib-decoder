@@ -16,25 +16,28 @@
 import gzip
 import json
 import os
+import pathlib
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 import zipfile
 
 import more_itertools
 import nemo.collections.asr as nemo_asr
-import riva.asrlib.decoder
+from ruamel.yaml import YAML
 import torch
-from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 from tqdm import tqdm
 
+import riva.asrlib.decoder
+from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig, WordBoostingInformation
 
 class GraphConstructionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        os.makedirs("tmp", exist_ok=True)
-        cls.temp_dir = os.path.abspath("tmp")
+        cls.temp_dir = os.path.abspath("tmp_graph_construction")
+        os.makedirs(cls.temp_dir, exist_ok=True)
 
         lm_zip_file = os.path.join(cls.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
@@ -82,6 +85,19 @@ class GraphConstructionTest(unittest.TestCase):
                 words_fh.write("\n")
 
         cls.nemo_model_path = os.path.join(cls.temp_dir, "stt_en_conformer_ctc_small.nemo")
+        config_yaml = os.path.join(cls.temp_dir, "model_config.yaml")
+
+        yaml = YAML(typ='safe')
+        with tarfile.open(cls.nemo_model_path, "r:gz") as tar_fh:
+            with tar_fh.extractfile("./model_config.yaml") as fh:
+                data = yaml.load(fh)
+        cls.units_txt = os.path.join(cls.temp_dir, "units.txt")
+        with open(cls.units_txt, "w") as fh:
+            for unit in data["decoder"]["vocabulary"]:
+                fh.write(f"{unit}\n")
+
+        cls.num_tokens_including_blank = len(data["decoder"]["vocabulary"]) + 1
+        assert cls.num_tokens_including_blank == 1025
 
     @classmethod
     def tearDownClass(cls):
@@ -93,6 +109,7 @@ class GraphConstructionTest(unittest.TestCase):
 
     def test_vanilla_ctc_topo(self):
         self.create_TLG("ctc", os.path.join(self.temp_dir, "ctc"))
+        self.run_decoder(os.path.join(self.temp_dir, "ctc"))
 
     def test_compact_ctc_topo(self):
         self.create_TLG("ctc_compact", os.path.join(self.temp_dir, "ctc_compact"))
@@ -125,6 +142,8 @@ class GraphConstructionTest(unittest.TestCase):
                 "1",
                 "--lm_lowercase",
                 "true",
+                "--units",
+                self.units_txt,
                 "--topo",
                 topo,
                 lexicon_path,
@@ -133,21 +152,14 @@ class GraphConstructionTest(unittest.TestCase):
             ]
         )
 
-    def run_decoder(self):
+    def run_decoder(self, graph_path: str):
         asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
-        test_data_dir = pathlib.Path(__file__).parent.resolve() / "test_data"
 
-        logits_ark = str("ark:" / test_data_dir / "logits.ark")
-
-        _, matrix = next(kaldi_io.read_mat_ark(logits_ark))
-        num_tokens_including_blank = matrix.shape[1]
-
-        # TODO: What to do about minimize option?
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
-        # config.online_opts.lattice_postprocessor_opts.word_boundary_rxfilename = str(
-        #     test_data_dir / "word_boundary.int"
-        # )
+        config.online_opts.lattice_postprocessor_opts.word_boundary_rxfilename = str(
+            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/phones/word_boundary.int")
+        )
         config.online_opts.decoder_opts.default_beam = 17.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
         config.online_opts.decoder_opts.max_active = 7000
@@ -155,60 +167,29 @@ class GraphConstructionTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
+        config.online_opts.lattice_postprocessor_opts.max_expand = 10
         decoder = BatchedMappedDecoderCuda(
-            config, str(test_data_dir / "TLG.fst"), str(test_data_dir / "words.txt"), num_tokens_including_blank
+            config,
+            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            self.num_tokens_including_blank
         )
 
-        for batch in more_itertools.chunked(kaldi_io.read_mat_ark(logits_ark), config.online_opts.max_batch_size):
-            all_logits = asr_model.transcribe(audio_file_paths, batch_size=args.acoustic_batch_size, logprobs=True)
+        manifest = "/mnt/disks/sda_hdd/librispeech/dev_clean.json"
+        paths = []
+        with open(manifest) as fh:
+            for line in fh:
+                entry = json.loads(line)
+                paths.append(entry["audio_filepath"])
 
-            sequences = []
-            sequence_lengths = []
-            for key, matrix in batch:
-                sequences.append(torch.from_numpy(matrix.copy()))
-                sequence_lengths.append(matrix.shape[0])
-            padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
+        for path in paths:
+            logprobs = asr_model.transcribe([path], batch_size=1, logprobs=True)
+            sequences = [torch.from_numpy(logprobs[0]).cuda()]
+            sequence_lengths = [logprobs[0].shape[0]]
+            word_boost_infos = [WordBoostingInformation([])]
+            padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
-            for result in decoder.decode(padded_sequence, sequence_lengths_tensor):
+            for result in decoder.decode(padded_sequence,
+                                         sequence_lengths_tensor,
+                                         word_boost_infos):
                 print(result)
-
-
-def get_logits(asr_model, paths2audio_files, batch_size):
-    device = next(asr_model.parameters()).device
-    asr_model.preprocessor.featurizer.dither = 0.0
-    asr_model.preprocessor.featurizer.pad_to = 0
-    asr_model.eval()
-    asr_model.encoder.freeze()
-    asr_model.decoder.freeze()
-
-    if num_workers is None:
-        num_workers = os.cpu_count()
-
-    # Work in tmp directory - will store manifest file there
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with open(os.path.join(tmpdir, 'manifest.json'), 'w', encoding='utf-8') as fp:
-            for audio_file in paths2audio_files:
-                entry = {'audio_filepath': audio_file, 'duration': 100000, 'text': ''}
-                fp.write(json.dumps(entry) + '\n')
-
-            config = {
-                'paths2audio_files': paths2audio_files,
-                'batch_size': batch_size,
-                'temp_dir': tmpdir,
-                'num_workers': num_workers,
-            }
-
-        temporary_datalayer = self._setup_transcribe_dataloader(config)
-        for test_batch in tqdm(temporary_datalayer, desc="Transcribing"):
-            logits, logits_len, greedy_predictions = self.forward(
-                input_signal=test_batch[0].to(device), input_signal_length=test_batch[1].to(device)
-            )
-            # dump log probs per file
-            for idx in range(logits.shape[0]):
-                lg = logits[idx][: logits_len[idx]]
-                hypotheses.append(lg.cpu().numpy())
-            hypotheses += current_hypotheses
-
-            del greedy_predictions
-            del logits
-            del test_batch
