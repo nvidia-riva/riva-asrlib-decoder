@@ -31,7 +31,7 @@ import torch
 from tqdm import tqdm
 
 import riva.asrlib.decoder
-from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig, WordBoostingInformation
+from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
 class GraphConstructionTest(unittest.TestCase):
     @classmethod
@@ -186,10 +186,8 @@ class GraphConstructionTest(unittest.TestCase):
             logprobs = asr_model.transcribe([path], batch_size=1, logprobs=True)
             sequences = [torch.from_numpy(logprobs[0]).cuda()]
             sequence_lengths = [logprobs[0].shape[0]]
-            word_boost_infos = [WordBoostingInformation([])]
             padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
             for result in decoder.decode(padded_sequence,
-                                         sequence_lengths_tensor,
-                                         word_boost_infos):
+                                         sequence_lengths_tensor):
                 print(result)
