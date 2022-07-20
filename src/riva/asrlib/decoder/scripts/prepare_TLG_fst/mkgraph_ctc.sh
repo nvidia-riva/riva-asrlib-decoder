@@ -51,6 +51,11 @@ lexicon_path=$1
 lm_path=$2
 dest_dir=$3
 
+if [ -z $units ]; then
+    log "--units argument must be specified"
+    exit 1
+fi
+
 
 mkdir -p ${dest_dir}
 
