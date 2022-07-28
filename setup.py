@@ -64,6 +64,8 @@ class BuildExtension(build_ext):
         openfst_binaries = [f"fst{operation}" for operation in "arcsort closure compile concat connect convert determinize disambiguate encode epsnormalize equal equivalent invert isomorphic map minimize project prune push randgen relabel replace reverse reweight synchronize topsort union".split(" ")]
         fst_binaries = "arpa2fst arpa-to-const-arpa fstdeterminizestar fstrmsymbols fstisstochastic fstminimizeencoded fstmakecontextfst fstmakecontextsyms fstaddsubsequentialloop fstaddselfloops fstrmepslocal fstcomposecontext fsttablecompose fstrand fstdeterminizelog fstphicompose fstcopy fstpushspecial fsts-to-transcripts fsts-project fsts-union fsts-concat transcripts-to-fsts".split(" ")
         fst_binaries.extend(openfst_binaries)
+        # ERROR to fix: "fstcompose" is used in mkgraph_ctc.sh...
+        fst_binaries = ["arpa2fst", "fsttablecompose", "fstdeterminizestar", "fstminimizeencoded", "fstarcsort", "fstcompile", "fstaddselfloops", "transcripts-to-fsts"]
         build_cmd = f'''
         cd {self.build_temp}
         
@@ -127,7 +129,7 @@ setuptools.setup(
     # scripts=(glob.glob("scripts/prepare_TLG_fst/**/*.py") +
     #          glob.glob("scripts/prepare_TLG_fst/**/*.sh")),
     include_package_data=True,
-    install_requires=["sentencepiece", "cmake", "ninja",],
+    install_requires=["sentencepiece", "cmake>=3.18", "ninja",],
     extras_require={
         'testing': [
             "kaldi-io",
