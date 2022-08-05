@@ -63,8 +63,13 @@ if(NOT openfst_POPULATED)
   set_target_properties(riva_asrlib_openfst PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
   target_compile_options(riva_asrlib_openfst PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable)
 
+  add_library(fst-types OBJECT "${openfst_SOURCE_DIR}/src/lib/fst-types.cc")
+  target_include_directories(fst-types SYSTEM PUBLIC ${openfst_SOURCE_DIR}/src/include/)
+  set_target_properties(fst-types PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+  target_compile_options(fst-types PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable)
+
+
   add_library(fstscript_base
-    SHARED
     "${openfst_SOURCE_DIR}/src/script/arciterator-class.cc"
     "${openfst_SOURCE_DIR}/src/script/encodemapper-class.cc"
     "${openfst_SOURCE_DIR}/src/script/fst-class.cc"
@@ -72,10 +77,8 @@ if(NOT openfst_POPULATED)
     "${openfst_SOURCE_DIR}/src/script/stateiterator-class.cc"
     "${openfst_SOURCE_DIR}/src/script/text-io.cc"
     "${openfst_SOURCE_DIR}/src/script/weight-class.cc"
-    ${openfst_SOURCE_DIR}/src/lib/fst-types.cc
-    # $<TARGET_OBJECTS:openfst-types>
     )
-  target_link_libraries(fstscript_base PUBLIC riva_asrlib_openfst ${CMAKE_DL_LIBS})
+  target_link_libraries(fstscript_base PUBLIC riva_asrlib_openfst ${CMAKE_DL_LIBS} $<TARGET_OBJECTS:fst-types>)
 
   foreach(operation arcsort closure compile concat connect convert decode determinize disambiguate encode epsnormalize equal equivalent invert isomorphic map minimize project prune push randequivalent randgen relabel replace reverse reweight synchronize topsort union)
     # decode verify

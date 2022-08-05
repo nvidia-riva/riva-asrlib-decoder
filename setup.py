@@ -65,7 +65,7 @@ class BuildExtension(build_ext):
         fst_binaries = "arpa2fst arpa-to-const-arpa fstdeterminizestar fstrmsymbols fstisstochastic fstminimizeencoded fstmakecontextfst fstmakecontextsyms fstaddsubsequentialloop fstaddselfloops fstrmepslocal fstcomposecontext fsttablecompose fstrand fstdeterminizelog fstphicompose fstcopy fstpushspecial fsts-to-transcripts fsts-project fsts-union fsts-concat transcripts-to-fsts".split(" ")
         fst_binaries.extend(openfst_binaries)
         # ERROR to fix: "fstcompose" is used in mkgraph_ctc.sh...
-        fst_binaries = ["arpa2fst", "fsttablecompose", "fstdeterminizestar", "fstminimizeencoded", "fstarcsort", "fstcompile", "fstaddselfloops", "transcripts-to-fsts"]
+        fst_binaries = ["arpa2fst", "fsttablecompose", "fstdeterminizestar", "fstminimizeencoded", "fstarcsort", "fstcompile", "fstaddselfloops", "transcripts-to-fsts", "fstconvert"]
         build_cmd = f'''
         cd {self.build_temp}
         
