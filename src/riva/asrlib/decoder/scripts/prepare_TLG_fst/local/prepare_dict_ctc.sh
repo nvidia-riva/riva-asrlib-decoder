@@ -115,7 +115,7 @@ if [ $probabilistic = true ]; then
 else
     (echo '<spoken_noise> [UNK]'; echo '<unk> [UNK]'; ) | cat - $lexicon | sort | uniq > $dir/lexicon.tmp || exit 1;
     cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u > $dir/units_from_lexicon.tmp
-    comm -23 $dir/valid_units.tmp <(sort $dir/units.txt) > $dir/units_diff.tmp
+    comm -23 $dir/units_from_lexicon.tmp <(sort $dir/units.txt) > $dir/units_diff.tmp
     grep -vFf $dir/units_diff.tmp $dir/lexicon.tmp > $dir/lexicon.txt
     # This needs to be an error. Ugh.
     [ -s $dir/lexicon.txt ] && cmp --silent $dir/lexicon.tmp $dir/lexicon.txt || echo "Something wrong with the final lexicon. Check units for consistency.";
