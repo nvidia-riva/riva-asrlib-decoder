@@ -33,6 +33,7 @@ sil_token="<space>"   # the character you have used to represent spaces
 set -e
 set -u
 set -o pipefail
+set -x
 
 
 lexicon=$1
@@ -114,9 +115,10 @@ if [ $probabilistic = true ]; then
 else
     (echo '<spoken_noise> [UNK]'; echo '<unk> [UNK]'; ) | cat - $lexicon | sort | uniq > $dir/lexicon.tmp || exit 1;
     grep -vFf <(comm -23 <(cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u) <(sort $dir/units.txt)) $dir/lexicon.tmp > $dir/lexicon.txt
+    # This needs to be an error. Ugh.
     [ -s $dir/lexicon.txt ] && cmp --silent $dir/lexicon.tmp $dir/lexicon.txt || echo "Something wrong with the final lexicon. Check units for consistency.";
 fi
 
 echo "lexicon.txt done"
 
-rm -rf $dir/*.tmp
+# rm -rf $dir/*.tmp
