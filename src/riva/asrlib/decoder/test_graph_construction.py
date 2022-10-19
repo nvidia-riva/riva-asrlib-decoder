@@ -157,9 +157,6 @@ class GraphConstructionTest(unittest.TestCase):
 
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
-        config.online_opts.lattice_postprocessor_opts.word_boundary_rxfilename = str(
-            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/phones/word_boundary.int")
-        )
         config.online_opts.decoder_opts.default_beam = 17.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
         config.online_opts.decoder_opts.max_active = 7000
@@ -167,7 +164,6 @@ class GraphConstructionTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
-        config.online_opts.lattice_postprocessor_opts.max_expand = 10
         decoder = BatchedMappedDecoderCuda(
             config,
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
