@@ -140,6 +140,7 @@ PybindBatchedMappedOnlineDecoderCudaConfig(py::module& m)
   pyclass.def_readwrite("decoder_opts", &PyClass::decoder_opts);
   pyclass.def_readwrite("det_opts", &PyClass::det_opts);
   pyclass.def_readwrite("lattice_postprocessor_opts", &PyClass::lattice_postprocessor_opts);
+  pyclass.def_readwrite("use_lattice_postprocessor", &PyClass::use_lattice_postprocessor);
 }
 
 int64_t
@@ -218,6 +219,63 @@ PybindBatchedMappedDecoderCuda(py::module& m)
     auto decoder = new PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
     return decoder;
   }));
+
+  pyclass.def(
+              "decode_write_lattice",
+      [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
+         const DLManagedTensor* managed_logits_lengths,
+         const std::vector<std::string>& keys,
+         const std::string& output_wspecifier) {
+        const DLTensor& logits = managed_logits->dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
+        if (logits.ndim != 3) {
+          throw std::invalid_argument("Expected a 3D logits tensor");
+        }
+        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
+          throw std::invalid_argument("Expected a float32 logits tensor");
+        }
+        if (logits.device.device_type != kDLCUDA) {
+          throw std::invalid_argument("Expected logits tensor to be on GPU");
+        }
+        if (logits_lengths.ndim != 1) {
+          throw std::invalid_argument("Expected a 1D logits lengths tensor");
+        }
+        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
+            logits_lengths.dtype.lanes != 1) {
+          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
+        }
+        if (logits_lengths.device.device_type != kDLCPU) {
+          throw std::invalid_argument("Expected lengths tensor to be on CPU");
+        }
+        // logits should be batch x time x logits
+        int64_t batch_size = logits_lengths.shape[0];
+
+        kaldi::CompactLatticeWriter clat_writer(output_wspecifier);
+        for (int64_t i = 0; i < batch_size; ++i) {
+          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
+
+          // this may not be right... Yes, it seems quite wrong...
+          const float* single_sample_logits_start = address<float>(logits, i, 0);
+          // number of rows is number of frames
+          // number of cols is number of logits
+          // stride of each row is stride. Always greater than number of cols
+          auto write_results =
+              [i, &clat_writer, &keys](
+                  std::tuple<
+                      std::optional<kaldi::CompactLattice>,
+                      std::optional<kaldi::cuda_decoder::CTMResult>>& asr_results) {
+              const kaldi::CompactLattice& lattice = std::get<0>(asr_results).value();
+              clat_writer.Write(keys[i], lattice);
+              };
+          cuda_pipeline.DecodeWithCallback(
+              single_sample_logits_start,
+              stride(logits, 1),
+              index<int64_t>(logits_lengths, i),
+              write_results);
+        }
+        cuda_pipeline.WaitForAllTasks();
+      });
+
 
   pyclass.def(
       "decode",

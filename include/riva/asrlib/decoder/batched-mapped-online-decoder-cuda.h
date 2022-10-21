@@ -38,7 +38,8 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   BatchedMappedOnlineDecoderCudaConfig()
       : max_batch_size(400), num_channels(800), num_post_processing_worker_threads(-1),
         determinize_lattice(true), num_decoder_copy_threads(2),
-        frame_shift_seconds(std::numeric_limits<float>::max())
+        frame_shift_seconds(std::numeric_limits<float>::max()),
+        use_lattice_postprocessor(true)
   {
   }
   void Register(kaldi::OptionsItf* po)
@@ -68,6 +69,9 @@ struct BatchedMappedOnlineDecoderCudaConfig {
         "cuda-decoder-frame-shift-seconds", &frame_shift_seconds,
         "The sampling period of log-likelihood vectors output by the "
         "acoustic model.");
+    po->Register(
+        "use-lattice-postprocessor", &use_lattice_postprocessor,
+        "");
 
     decoder_opts.Register(po);
     det_opts.Register(po);
@@ -80,6 +84,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   bool determinize_lattice;
   int num_decoder_copy_threads;
   float frame_shift_seconds{0.0f};
+  bool use_lattice_postprocessor;
 
   kaldi::cuda_decoder::CudaDecoderConfig decoder_opts;
   // can't necessarily determinize in this way... Actually, yes, we
@@ -134,10 +139,12 @@ class BatchedMappedOnlineDecoderCuda {
         *cuda_fst_, config_.decoder_opts,
         /*nlanes=*/config_.max_batch_size, config_.num_channels);
 
-    lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(
-        config_.lattice_postprocessor_opts);
-    lattice_postprocessor_->SetTransitionInformation(trans_information_.get());
-    lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
+    if (config_.use_lattice_postprocessor) {
+        lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(
+                                                                                             config_.lattice_postprocessor_opts);
+        lattice_postprocessor_->SetTransitionInformation(trans_information_.get());
+        lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
+    }
 
     // if (config_.num_decoder_copy_threads > 0) {
     //   cuda_decoder_->SetThreadPoolAndStartCPUWorkers(
@@ -367,13 +374,18 @@ class BatchedMappedOnlineDecoderCuda {
 
     // this is wasteful, since GetCTM calls GetPostprocessedLattice
     // but doesn't return the result.
-    kaldi::CompactLattice clat;
-    lattice_postprocessor_->GetPostprocessedLattice(dlat, &clat);
-    kaldi::cuda_decoder::CTMResult ctm;
-    lattice_postprocessor_->GetCTM(dlat, &ctm);
-
+    // okay, so I am basically doing both here...
     std::tuple<std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>
-        result{std::make_optional(clat), std::make_optional(ctm)};
+        result;
+    if (config_.use_lattice_postprocessor) {
+        kaldi::CompactLattice clat;
+        lattice_postprocessor_->GetPostprocessedLattice(dlat, &clat);
+        kaldi::cuda_decoder::CTMResult ctm;
+        lattice_postprocessor_->GetCTM(dlat, &ctm);
+        result = {std::make_optional(clat), std::make_optional(ctm)}; 
+    } else {
+        result = {std::make_optional(dlat), std::nullopt};
+    }
 
     // if ptr set and if callback func callable
     if (callback && *callback) {

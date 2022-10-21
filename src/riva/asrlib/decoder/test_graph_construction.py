@@ -164,6 +164,7 @@ class GraphConstructionTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
+        config.online_opts.use_lattice_postprocessor = False
         decoder = BatchedMappedDecoderCuda(
             config,
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
@@ -171,19 +172,38 @@ class GraphConstructionTest(unittest.TestCase):
             self.num_tokens_including_blank
         )
 
-        manifest = "/mnt/disks/sda_hdd/librispeech/dev_clean.json"
-        paths = []
-        with open(manifest) as fh:
-            for line in fh:
-                entry = json.loads(line)
-                paths.append(entry["audio_filepath"])
+        dir = os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7")
 
-        for path in paths:
-            logprobs = asr_model.transcribe([path], batch_size=1, logprobs=True)
-            sequences = [torch.from_numpy(logprobs[0]).cuda()]
-            sequence_lengths = [logprobs[0].shape[0]]
-            padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
+        os.makedirs("ctm", exist_ok=True)
+
+        import kaldi_io
+        for key, matrix in kaldi_io.read_mat_scp("scp:/home/dgalvez/scratch/code/asr/riva-asrlib-decoder/test/logits.scp"):
+            sequences = [torch.from_numpy(matrix.copy())]
+            sequence_lengths = [sequences[0].shape[0]]
+            padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
-            for result in decoder.decode(padded_sequence,
-                                         sequence_lengths_tensor):
-                print(result)
+            if config.online_opts.use_lattice_postprocessor:
+                # CTM output not produced when there is no lattice postprocessor
+                write_ctm_output(key, decoder.decode(padded_sequence, sequence_lengths_tensor)[0])
+            decoder.decode_write_lattice(padded_sequence, sequence_lengths_tensor, [key], "ark:|gzip -c > ctm/lat.1.gz")
+
+def write_ctm_output(key, result):
+    for word, start, end in result:
+        print(f"{key} 1 {start:.2f} {end - start:.2f} {word} 1.0")
+
+        # manifest = "/mnt/disks/sda_hdd/librispeech/dev_clean.json"
+        # paths = []
+        # with open(manifest) as fh:
+        #     for line in fh:
+        #         entry = json.loads(line)
+        #         paths.append(entry["audio_filepath"])
+
+        # for path in paths:
+        #     logprobs = asr_model.transcribe([path], batch_size=1, logprobs=True)
+        #     sequences = [torch.from_numpy(logprobs[0]).cuda()]
+        #     sequence_lengths = [logprobs[0].shape[0]]
+        #     padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
+        #     sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
+        #     for result in decoder.decode(padded_sequence,
+        #                                  sequence_lengths_tensor):
+        #         print(result)
