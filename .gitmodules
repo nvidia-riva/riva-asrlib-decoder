@@ -1,6 +1,6 @@
 [submodule "third_party/kaldi"]
 	path = third_party/kaldi
-	url = https://github.com/galv/kaldi.git
+	url = ssh://git@gitlab-master.nvidia.com:12051/dl/dgx/kaldi.git
 [submodule "third_party/pybind11"]
 	path = third_party/pybind11
 	url = https://github.com/pybind/pybind11.git

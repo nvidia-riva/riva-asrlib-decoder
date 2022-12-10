@@ -146,10 +146,6 @@ class BatchedMappedOnlineDecoderCuda {
         lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
     }
 
-    // if (config_.num_decoder_copy_threads > 0) {
-    //   cuda_decoder_->SetThreadPoolAndStartCPUWorkers(
-    //       thread_pool_.get(), config_.num_decoder_copy_threads);
-    // }
     cuda_decoder_->SetOutputFrameShiftInSeconds(config_.frame_shift_seconds);
 
     available_channels_.resize(config_.num_channels);
@@ -162,8 +158,13 @@ class BatchedMappedOnlineDecoderCuda {
 
     int num_worker_threads = config_.num_post_processing_worker_threads;
     if (num_worker_threads > 0) {
-      thread_pool_ = std::make_unique<kaldi::cuda_decoder::ThreadPoolLight>(num_worker_threads);
+      thread_pool_ = std::make_unique<kaldi::futures_thread_pool>(num_worker_threads);
     }
+    // TODO: Uncomment this
+    // if (config_.num_decoder_copy_threads > 0) {
+    //   cuda_decoder_->SetThreadPoolAndStartCPUWorkers(
+    //       thread_pool_.get(), config_.num_decoder_copy_threads);
+    // }
   }
 
   ~BatchedMappedOnlineDecoderCuda()
@@ -288,9 +289,7 @@ class BatchedMappedOnlineDecoderCuda {
     for (std::size_t i = 0; i < list_channels_last_chunk.size(); ++i) {
       uint64_t ichannel = list_channels_last_chunk[i];
       LatticeCallback* lattice_callback = list_lattice_callbacks_last_chunk[i];
-      thread_pool_->Push(
-          {&BatchedMappedOnlineDecoderCuda::FinalizeDecodingWrapper, this, ichannel,
-           static_cast<void*>(lattice_callback)});
+      thread_pool_->submit(std::bind(&BatchedMappedOnlineDecoderCuda::FinalizeDecoding, this, ichannel, lattice_callback));
     }
   }
 
@@ -471,7 +470,7 @@ class BatchedMappedOnlineDecoderCuda {
 
   // The thread pool receives data from device and post-processes it. This class
   // destructor blocks until the thread pool is drained of work items.
-  std::unique_ptr<kaldi::cuda_decoder::ThreadPoolLight> thread_pool_;
+  std::unique_ptr<kaldi::futures_thread_pool> thread_pool_;
 
   // The decoder owns thread(s) that reconstruct lattices transferred from the
   // device in a compacted form as arrays with offsets instead of pointers.
