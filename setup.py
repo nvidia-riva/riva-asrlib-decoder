@@ -129,7 +129,7 @@ setuptools.setup(
     # scripts=(glob.glob("scripts/prepare_TLG_fst/**/*.py") +
     #          glob.glob("scripts/prepare_TLG_fst/**/*.sh")),
     include_package_data=True,
-    install_requires=["sentencepiece", "cmake>=3.18,<3.25", "ninja",],
+    install_requires=["sentencepiece", "cmake>=3.25", "ninja",],
     extras_require={
         'testing': [
             "kaldi-io",

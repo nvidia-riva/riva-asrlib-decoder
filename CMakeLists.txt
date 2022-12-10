@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 3.18..3.19)
+cmake_minimum_required(VERSION 3.25)
 
 project(riva_asrlib LANGUAGES CUDA CXX)
 
@@ -154,6 +154,7 @@ set(cuda_decoder_sources
   third_party/kaldi/src/cudadecoder/cuda-decoder-kernels.cu
   third_party/kaldi/src/cudadecoder/lattice-postprocessor.cc
   third_party/kaldi/src/cudadecoder/cuda-fst.cc
+  third_party/kaldi/src/cudadecoder/thread-pool-cia.cc
   third_party/kaldi/src/online2/online-endpoint.cc
 
   src/riva/asrlib/decoder/ctc_transition_information.cc
@@ -176,10 +177,9 @@ target_compile_definitions(riva_asrlib_wfst_decoder
   PUBLIC HAVE_CUDA=1)
 target_compile_features(riva_asrlib_wfst_decoder PUBLIC cxx_std_17
   PUBLIC cuda_std_17)
-find_library(LIBNVTOOLSEXT nvToolsExt PATHS ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 target_link_libraries(riva_asrlib_wfst_decoder
   PUBLIC Threads::Threads
-  PRIVATE nvToolsExt
+  PRIVATE CUDA::nvtx3
   PUBLIC riva_asrlib_openfst)
 # target_link_options(riva_asrlib_wfst_decoder PRIVATE -Wl,--no-undefined)
 target_compile_options(riva_asrlib_wfst_decoder PUBLIC -Wno-unused-but-set-variable -ffunction-sections -fdata-sections)
