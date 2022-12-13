@@ -49,9 +49,6 @@ class DecoderTest(unittest.TestCase):
         # TODO: What to do about minimize option?
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
-        config.online_opts.lattice_postprocessor_opts.word_boundary_rxfilename = str(
-            test_data_dir / "word_boundary.int"
-        )
         config.online_opts.decoder_opts.default_beam = 17.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
         config.online_opts.decoder_opts.max_active = 7000
@@ -59,7 +56,6 @@ class DecoderTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
-        config.online_opts.lattice_postprocessor_opts.max_expand = 10
         decoder = BatchedMappedDecoderCuda(
             config, str(test_data_dir / "TLG.fst"), str(test_data_dir / "words.txt"), num_tokens_including_blank
         )
@@ -72,6 +68,6 @@ class DecoderTest(unittest.TestCase):
                 sequence_lengths.append(matrix.shape[0])
             padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
-            
+
             for result in decoder.decode(padded_sequence, sequence_lengths_tensor):
-                print(result)
+                pass

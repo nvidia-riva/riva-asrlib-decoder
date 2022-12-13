@@ -6,6 +6,22 @@ as a python library (via wrapping the C++ library with pybind11). It
 is the same decoder used when you specify --decoder_type=kaldi when
 running `riva-build` in NVIDIA Riva.
 
+## Pre-built wheels
+
+Install from [PyPi](https://pypi.org/project/riva-asrlib-decoder/).
+
+```
+pip install riva-asrlib-decoder
+```
+
+These manylinux2014 wheels, with the exception that they use cuda. You
+need cuda 11.2.1 or greater and python 3.7 or greater.
+
+Python 3.6 could be supported if required. Cuda as old as 10.2 could
+also be supported, but there is an
+[incompatibility](https://forums.developer.nvidia.com/t/nvc-20-9-fails-to-compile-code-instantiating-any-std-tuple-with-gcc-10-2-on-c-17/160987)
+with gcc-10 (which manylinux2014 uses) not fixed until cuda 11.2.1.
+
 ## Build and Test
 
 To build just the offline binary:
@@ -18,7 +34,8 @@ cmake --build --target all --parallel
 # Run build/offline-cuda-decode-binary
 ```
 
-To build the python bindings and optionally run the python test cases:
+To build the python bindings from source and optionally run the python
+test cases:
 
 ```
 # Optionally set up a conda environment first.

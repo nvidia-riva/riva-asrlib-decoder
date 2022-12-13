@@ -44,9 +44,6 @@ class BuildExtension(build_ext):
         
         system_make_args = os.environ.get('MAKEFLAGS', '')
 
-        if cmake_args == '':
-            cmake_args = '-DCMAKE_BUILD_TYPE=Release'
-
         cmake_args += " -DRIVA_ASRLIB_BUILD_PYTHON_BINDINGS=ON "
 
         if (
@@ -96,7 +93,7 @@ class BuildExtension(build_ext):
                         f'{dir_path}/src/riva/asrlib/decoder/scripts/prepare_TLG_fst/bin')
 
 setuptools.setup(
-    python_requires='>=3.5',
+    python_requires='>=3.7',
     name='riva-asrlib-decoder',
     version='0.1.0',
     author='NVIDIA',
@@ -129,7 +126,7 @@ setuptools.setup(
     # scripts=(glob.glob("scripts/prepare_TLG_fst/**/*.py") +
     #          glob.glob("scripts/prepare_TLG_fst/**/*.sh")),
     include_package_data=True,
-    install_requires=["sentencepiece", "cmake>=3.25", "ninja",],
+    install_requires=["sentencepiece",],
     extras_require={
         'testing': [
             "kaldi-io",

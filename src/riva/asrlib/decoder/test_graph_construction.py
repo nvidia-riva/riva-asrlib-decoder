@@ -164,7 +164,6 @@ class GraphConstructionTest(unittest.TestCase):
         config.online_opts.max_batch_size = 400
         config.online_opts.num_channels = 800
         config.online_opts.frame_shift_seconds = 0.03
-        config.online_opts.use_lattice_postprocessor = False
         decoder = BatchedMappedDecoderCuda(
             config,
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
@@ -177,13 +176,12 @@ class GraphConstructionTest(unittest.TestCase):
         os.makedirs("ctm", exist_ok=True)
 
         import kaldi_io
-        for key, matrix in kaldi_io.read_mat_scp("scp:/home/dgalvez/scratch/code/asr/riva-asrlib-decoder/test/logits.scp"):
+        for key, matrix in kaldi_io.read_mat_scp("ark:test_data/logits.ark"):  # "scp:/home/dgalvez/scratch/code/asr/riva-asrlib-decoder/test/logits.scp"):
             sequences = [torch.from_numpy(matrix.copy())]
             sequence_lengths = [sequences[0].shape[0]]
             padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
             if config.online_opts.use_lattice_postprocessor:
-                # CTM output not produced when there is no lattice postprocessor
                 write_ctm_output(key, decoder.decode(padded_sequence, sequence_lengths_tensor)[0])
             decoder.decode_write_lattice(padded_sequence, sequence_lengths_tensor, [key], "ark:|gzip -c > ctm/lat.1.gz")
 
