@@ -13,8 +13,10 @@ build = "{cp36-manylinux_x86_64,cp37-manylinux_x86_64,cp38-manylinux_x86_64,cp39
 # Need to set the pythonLocation environment variable manually becase CMake picks up /usr/bin/python3.6 no matter what otherwise
 # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html#prop_tgt:CUDA_ARCHITECTURES
 environment = 'RIVA_ASRLIB_DECODER_CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" CUDAARCHS="52-real;60-real;61-real;70-real;75-real;80-real;86" pythonLocation="$(readlink -f $(which python))/.."'
-before-test = "ls -lh {project}/ {project}/src {project}/src/riva"
-test-command = "python -m unittest {project}/src/riva/asrlib/decoder/"
-test-requires = ["kaldi-io", "more-itertools", "nemo_toolkit[asr]"]
+# nemo_toolkit[asr] depends upon Cython having already been installed because
+# it uses setup.py, not pyproject.toml
+before-test = "pip install Cython"
+test-command = "pytest {project}/src/riva/asrlib/decoder/test_decoder.py"
+test-requires = ["pytest", "kaldi-io", "more-itertools", "nemo_toolkit[asr]"]
 # fails because onnx doesn't provide python3.6 wheels: https://pypi.org/project/onnx/#files
 test-skip = "cp36-manylinux_x86_64"

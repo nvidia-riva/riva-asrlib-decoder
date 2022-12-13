@@ -15,10 +15,9 @@ pip install riva-asrlib-decoder
 ```
 
 These manylinux2014 wheels, with the exception that they use cuda. You
-need cuda 11.2.1 or greater and python 3.7 or greater.
+need cuda 11.2.1 or greater and python 3.6 or greater.
 
-Python 3.6 could be supported if required. Cuda as old as 10.2 could
-also be supported, but there is an
+Cuda as old as 10.2 could also be supported, but there is an
 [incompatibility](https://forums.developer.nvidia.com/t/nvc-20-9-fails-to-compile-code-instantiating-any-std-tuple-with-gcc-10-2-on-c-17/160987)
 with gcc-10 (which manylinux2014 uses) not fixed until cuda 11.2.1.
 

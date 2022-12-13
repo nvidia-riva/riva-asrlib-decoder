@@ -128,6 +128,7 @@ setuptools.setup(
     install_requires=["sentencepiece",],
     extras_require={
         'testing': [
+            "pytest",
             "kaldi-io",
             "more-itertools",
             "nemo_toolkit[asr]",
