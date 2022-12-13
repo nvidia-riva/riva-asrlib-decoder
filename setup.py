@@ -101,7 +101,6 @@ setuptools.setup(
     keywords='ASR, CUDA, WFST, Decoder',
     description="Implementation of https://arxiv.org/abs/1910.10032",
     url='https://github.com/nvidia-riva/riva-asrlib-decoder',
-    # namespace_packages=['riva.asrlib'],
     package_dir={
         '': 'src',
         'riva.asrlib.decoder': 'src/riva/asrlib/decoder',
