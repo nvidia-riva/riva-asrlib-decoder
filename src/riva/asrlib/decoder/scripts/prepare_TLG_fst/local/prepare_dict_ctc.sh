@@ -118,5 +118,3 @@ else
 fi
 
 echo "lexicon.txt done"
-
-rm -rf $dir/*.tmp
