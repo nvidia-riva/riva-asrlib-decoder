@@ -160,11 +160,10 @@ class BatchedMappedOnlineDecoderCuda {
     if (num_worker_threads > 0) {
       thread_pool_ = std::make_unique<kaldi::futures_thread_pool>(num_worker_threads);
     }
-    // TODO: Uncomment this
-    // if (config_.num_decoder_copy_threads > 0) {
-    //   cuda_decoder_->SetThreadPoolAndStartCPUWorkers(
-    //       thread_pool_.get(), config_.num_decoder_copy_threads);
-    // }
+    if (config_.num_decoder_copy_threads > 0) {
+      cuda_decoder_->SetThreadPoolAndStartCPUWorkers(
+          thread_pool_.get(), config_.num_decoder_copy_threads);
+    }
   }
 
   ~BatchedMappedOnlineDecoderCuda()
@@ -393,14 +392,6 @@ class BatchedMappedOnlineDecoderCuda {
     }
 
     n_lattice_callbacks_not_done_.fetch_sub(1, std::memory_order_release);
-  }
-
-  // static wrapper for thread pool
-  static void FinalizeDecodingWrapper(void* obj, uint64_t ichannel64, void* callback_ptr)
-  {
-    int32 ichannel = static_cast<int32>(ichannel64);
-    const LatticeCallback* callback = static_cast<const LatticeCallback*>(callback_ptr);
-    static_cast<BatchedMappedOnlineDecoderCuda*>(obj)->FinalizeDecoding(ichannel, callback);
   }
 
   void ListIChannelsInBatch(const std::vector<CorrelationID>& corr_ids, std::vector<int>* channels)
