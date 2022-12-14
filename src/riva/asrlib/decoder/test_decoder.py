@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import itertools
+import multiprocessing
 import os
 import pathlib
 import shutil
@@ -41,7 +42,7 @@ class DecoderTest(unittest.TestCase):
         test_data_dir = pathlib.Path(__file__).parent.resolve() / "test_data"
         download_test_data(test_data_dir)
 
-        logits_ark = str("ark:" / test_data_dir / "logits.ark")
+        logits_ark = str("ark,bg:" / test_data_dir / "logits.ark")
 
         _, matrix = next(kaldi_io.read_mat_ark(logits_ark))
         num_tokens_including_blank = matrix.shape[1]
@@ -53,21 +54,24 @@ class DecoderTest(unittest.TestCase):
         config.online_opts.decoder_opts.lattice_beam = 8.0
         config.online_opts.decoder_opts.max_active = 7000
         config.online_opts.determinize_lattice = True
-        config.online_opts.max_batch_size = 400
-        config.online_opts.num_channels = 800
+        config.online_opts.max_batch_size = 200
+        config.online_opts.num_channels = config.online_opts.max_batch_size * 2
         config.online_opts.frame_shift_seconds = 0.03
+        config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count()
+        config.online_opts.num_decoder_copy_threads = 4
         decoder = BatchedMappedDecoderCuda(
             config, str(test_data_dir / "TLG.fst"), str(test_data_dir / "words.txt"), num_tokens_including_blank
         )
 
-        for batch in more_itertools.chunked(kaldi_io.read_mat_ark(logits_ark), 1):
+        for batch in more_itertools.chunked(kaldi_io.read_mat_ark(logits_ark), config.online_opts.max_batch_size):
             sequences = []
             sequence_lengths = []
             for key, matrix in batch:
                 sequences.append(torch.from_numpy(matrix.copy()))
                 sequence_lengths.append(matrix.shape[0])
+            # This could be faster with pinned memory, but this unit test is fast enough right now.
             padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True).cuda()
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
 
-            for result in decoder.decode(padded_sequence, sequence_lengths_tensor):
-                pass
+            # ignore output
+            decoder.decode(padded_sequence, sequence_lengths_tensor)
