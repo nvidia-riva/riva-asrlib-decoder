@@ -132,6 +132,7 @@ setuptools.setup(
             "kaldi-io",
             "more-itertools",
             "nemo_toolkit[asr]",
+            "torchaudio",
         ]
     },
     zip_safe=False,

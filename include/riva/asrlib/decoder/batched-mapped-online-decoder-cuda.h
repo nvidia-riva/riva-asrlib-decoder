@@ -195,7 +195,6 @@ class BatchedMappedOnlineDecoderCuda {
       channels = &channels_;
     }
     ListIChannelsInBatch(corr_ids, &channels_);
-    // KALDI_LOG << "GALVEZ:CHANNELS:" << channels_[0];
 
     std::vector<int> list_channels_first_chunk;
     for (std::size_t i = 0; i < is_first_chunk.size(); ++i) {
