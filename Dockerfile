@@ -13,6 +13,7 @@ FROM ${FROM_IMAGE_NAME}
 ENV PATH=/usr/local/cuda/bin:${PATH}
 
 ENV NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+ENV NVIDIA_VISIBLE_DEVICES=all
 
 # CUDA
 COPY --from=cuda /usr/local/cuda /usr/local/cuda
