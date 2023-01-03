@@ -117,9 +117,11 @@ struct BatchedMappedOnlineDecoderCudaConfig {
 class BatchedMappedOnlineDecoderCuda {
  public:
   using CorrelationID = uint64_t;
-  using LatticeCallback = std::function<void(
-      std::tuple<
-          std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>&)>;
+  using ReturnType =
+    std::tuple<std::optional<kaldi::CompactLattice>,
+               std::optional<kaldi::cuda_decoder::CTMResult>,
+               std::optional<std::vector<kaldi::cuda_decoder::NBestResult>>>;
+  using LatticeCallback = std::function<void(ReturnType&)>;
   BatchedMappedOnlineDecoderCuda(
       const BatchedMappedOnlineDecoderCudaConfig& config, const fst::Fst<fst::StdArc>& decode_fst,
       std::unique_ptr<kaldi::TransitionInformation>&& trans_information)
@@ -346,6 +348,7 @@ class BatchedMappedOnlineDecoderCuda {
 
 
  private:
+  // could use this as an opportunity to clear saved variables for the channel
   void FinalizeDecoding(int32 ichannel, const LatticeCallback* callback)
   {
     kaldi::Lattice lat;
@@ -371,17 +374,17 @@ class BatchedMappedOnlineDecoderCuda {
 
     // this is wasteful, since GetCTM calls GetPostprocessedLattice
     // but doesn't return the result.
-    // okay, so I am basically doing both here...
-    std::tuple<std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>
-        result;
+    ReturnType result;
     if (config_.use_lattice_postprocessor) {
         kaldi::CompactLattice clat;
         lattice_postprocessor_->GetPostprocessedLattice(dlat, &clat);
         kaldi::cuda_decoder::CTMResult ctm;
+        // is this okay? I am modifying the refernece twice...
         lattice_postprocessor_->GetCTM(dlat, &ctm);
-        result = {std::make_optional(clat), std::make_optional(ctm)}; 
+        std::vector<kaldi::cuda_decoder::NBestResult> nbest = lattice_postprocessor_->GetNBestList(dlat);
+        result = {std::make_optional(clat), std::make_optional(ctm), std::make_optional(nbest)};
     } else {
-        result = {std::make_optional(dlat), std::nullopt};
+        result = {std::make_optional(dlat), std::nullopt, std::nullopt};
     }
 
     // if ptr set and if callback func callable

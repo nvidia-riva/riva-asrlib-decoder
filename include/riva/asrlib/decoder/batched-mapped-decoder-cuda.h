@@ -48,9 +48,7 @@ class BatchedMappedDecoderCuda {
       std::size_t logits_n_input_frames_valid,
       // this should not be copied by reference. It should be passed as an
       // lvalue or an rvalue because it is always copied.
-      const std::function<void(std::tuple<
-                               std::optional<kaldi::CompactLattice>,
-                               std::optional<kaldi::cuda_decoder::CTMResult>>&)>& callback);
+      const BatchedMappedOnlineDecoderCuda::LatticeCallback& callback);
 
   void ComputeTasks();
   void AcquireTasks();
@@ -96,10 +94,7 @@ class BatchedMappedDecoderCuda {
     std::size_t logits_frame_stride;
     std::size_t logits_n_input_frames_valid;
     CorrelationID corr_id;
-    std::function<void(
-        std::tuple<
-            std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>>&)>
-        callback;
+    BatchedMappedOnlineDecoderCuda::LatticeCallback callback;
 
     std::size_t loglikes_time_offset = std::size_t(0);
   };

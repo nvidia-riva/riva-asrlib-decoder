@@ -74,4 +74,4 @@ class DecoderTest(unittest.TestCase):
             sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
 
             # ignore output
-            decoder.decode(padded_sequence, sequence_lengths_tensor)
+            decoder.decode_mbr(padded_sequence, sequence_lengths_tensor)

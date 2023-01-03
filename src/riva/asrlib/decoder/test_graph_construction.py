@@ -14,10 +14,12 @@
 # limitations under the License.
 
 import gzip
+from contextlib import ExitStack
 import json
 import multiprocessing
 import os
 import pathlib
+import pytest
 import shutil
 import subprocess
 import tarfile
@@ -38,37 +40,38 @@ from tqdm import tqdm
 import riva.asrlib.decoder
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
-class GraphConstructionTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.temp_dir = os.path.abspath("tmp_graph_construction")
-        os.makedirs(cls.temp_dir, exist_ok=True)
+class TestGraphConstruction:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        # return_type = namedtuple(["temp_dir", "words_path", "gzipped_lm_path", "nemo_model_path", "units_txt", "num_tokens_including_blank", "dataset_map"])
+        self.temp_dir = os.path.abspath("tmp_graph_construction")
+        os.makedirs(self.temp_dir, exist_ok=True)
 
-        lm_zip_file = os.path.join(cls.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
+        lm_zip_file = os.path.join(self.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
             subprocess.check_call(
                 f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_lm/versions/deployable_v1.0/zip -O {lm_zip_file}",
                 shell=True,
             )
             with zipfile.ZipFile(lm_zip_file, 'r') as zip_ref:
-                zip_ref.extractall(cls.temp_dir)
+                zip_ref.extractall(self.temp_dir)
 
-        am_zip_file = os.path.join(cls.temp_dir, "stt_en_conformer_ctc_small_1.6.0.zip")
+        am_zip_file = os.path.join(self.temp_dir, "stt_en_conformer_ctc_small_1.6.0.zip")
         if not os.path.exists(am_zip_file):
             subprocess.check_call(
                 f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_conformer_ctc_small/versions/1.6.0/zip -O {am_zip_file}",
                 shell=True,
             )
             with zipfile.ZipFile(am_zip_file, 'r') as zip_ref:
-                zip_ref.extractall(cls.temp_dir)
+                zip_ref.extractall(self.temp_dir)
 
         # Work around: At the time of writing this test, the words.txt
         # file downloaded from NGC is simply a git lfs stub file, not
-        # the actual file itself, so overwrite cls.words_path by
+        # the actual file itself, so overwrite self.words_path by
         # exracting the symbol table from the arpa file
-        lm_path = os.path.join(cls.temp_dir, "3-gram.pruned.3e-7.arpa")
-        cls.words_path = os.path.join(cls.temp_dir, "words.mixed_lm.3-gram.pruned.3e-7.txt")
-        temp_words_path = os.path.join(cls.temp_dir, "words_with_ids.txt")
+        lm_path = os.path.join(self.temp_dir, "3-gram.pruned.3e-7.arpa")
+        self.words_path = os.path.join(self.temp_dir, "words.mixed_lm.3-gram.pruned.3e-7.txt")
+        temp_words_path = os.path.join(self.temp_dir, "words_with_ids.txt")
         if not os.path.exists(temp_words_path):
             subprocess.check_call(
                 [
@@ -78,11 +81,11 @@ class GraphConstructionTest(unittest.TestCase):
                     "/dev/null",
                 ]
             )
-        cls.gzipped_lm_path = lm_path + ".gz"
-        with open(lm_path, 'rb') as f_in, gzip.open(cls.gzipped_lm_path, 'wb') as f_out:
+        self.gzipped_lm_path = lm_path + ".gz"
+        with open(lm_path, 'rb') as f_in, gzip.open(self.gzipped_lm_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
-        with open(temp_words_path, "r") as words_with_ids_fh, open(cls.words_path, "w") as words_fh:
+        with open(temp_words_path, "r") as words_with_ids_fh, open(self.words_path, "w") as words_fh:
             for word_with_id in words_with_ids_fh:
                 word = word_with_id.split()[0].lower()
                 if word in {"<eps>", "<s>", "</s>", "<unk>"}:
@@ -90,33 +93,46 @@ class GraphConstructionTest(unittest.TestCase):
                 words_fh.write(word)
                 words_fh.write("\n")
 
-        cls.nemo_model_path = os.path.join(cls.temp_dir, "stt_en_conformer_ctc_small.nemo")
-        config_yaml = os.path.join(cls.temp_dir, "model_config.yaml")
+        self.nemo_model_path = os.path.join(self.temp_dir, "stt_en_conformer_ctc_small.nemo")
+        config_yaml = os.path.join(self.temp_dir, "model_config.yaml")
 
         yaml = YAML(typ='safe')
-        with tarfile.open(cls.nemo_model_path, "r:gz") as tar_fh:
+        with tarfile.open(self.nemo_model_path, "r:gz") as tar_fh:
             with tar_fh.extractfile("./model_config.yaml") as fh:
                 data = yaml.load(fh)
-        cls.units_txt = os.path.join(cls.temp_dir, "units.txt")
-        with open(cls.units_txt, "w") as fh:
+        self.units_txt = os.path.join(self.temp_dir, "units.txt")
+        with open(self.units_txt, "w") as fh:
             for unit in data["decoder"]["vocabulary"]:
                 fh.write(f"{unit}\n")
 
-        cls.num_tokens_including_blank = len(data["decoder"]["vocabulary"]) + 1
-        assert cls.num_tokens_including_blank == 1025
+        self.num_tokens_including_blank = len(data["decoder"]["vocabulary"]) + 1
+        assert self.num_tokens_including_blank == 1025
 
-    @classmethod
-    def tearDownClass(cls):
-        pass
-        # shutil.rmtree(cls.temp_dir)
+        librispeech_test_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True)
+        librispeech_test_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)
+        self.dataset_map = {
+            "test_clean": librispeech_test_clean,
+            "test_other": librispeech_test_other,
+        }
+
 
     def test_eesen_ctc_topo(self):
         self.create_TLG("ctc_eesen", os.path.join(self.temp_dir, "ctc_eesen"))
 
-    # @pytest.mark.parametrize("")
-    def test_vanilla_ctc_topo(self):
-        # self.create_TLG("ctc", os.path.join(self.temp_dir, "ctc"))
-        self.run_decoder(os.path.join(self.temp_dir, "ctc"))
+    # TODO: Debug why these WERs are a bit higher than the ones reported here for "N-gram LM"
+    # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_conformer_ctc_small
+    # TODO: Investigate
+    @pytest.mark.parametrize("dataset, expected_wer, half_precision",
+                             [# ("test_clean", 0.03509205721241631, False),
+                              ("test_clean", 0.035263237979306146, True),
+                              # Causes a crash when I run twice...
+                              # ("test_other", 0.07034369447681639, False)
+                             ])
+    def test_vanilla_ctc_topo(self, dataset, expected_wer, half_precision):
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        # self.create_TLG("ctc", work_dir)
+        wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision)
+        assert wer <= expected_wer
 
     def test_compact_ctc_topo(self):
         self.create_TLG("ctc_compact", os.path.join(self.temp_dir, "ctc_compact"))
@@ -159,9 +175,8 @@ class GraphConstructionTest(unittest.TestCase):
             ]
         )
 
-    def run_decoder(self, graph_path: str):
-        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
-
+    @staticmethod
+    def create_decoder_config():
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
         config.online_opts.decoder_opts.default_beam = 17.0
@@ -178,8 +193,15 @@ class GraphConstructionTest(unittest.TestCase):
         config.online_opts.lattice_postprocessor_opts.acoustic_scale = 10.0
         config.online_opts.lattice_postprocessor_opts.lm_scale = 6.0
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
-        config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count()
-        config.online_opts.num_decoder_copy_threads = 4
+        config.online_opts.num_decoder_copy_threads = 1
+        config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
+
+        return config
+
+    def run_decoder(self, graph_path: str, dataset: torch.utils.data.IterableDataset, half_precision: bool):
+        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+
+        config = self.create_decoder_config()
         decoder = BatchedMappedDecoderCuda(
             config,
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
@@ -187,17 +209,12 @@ class GraphConstructionTest(unittest.TestCase):
             self.num_tokens_including_blank
         )
 
-        librispeech = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True)
         data_loader = torch.utils.data.DataLoader(
-            librispeech,
+            dataset,
             batch_size=config.online_opts.num_channels,
-            num_workers=4,
+            # num_workers=1,
             collate_fn=collate_fn,
             pin_memory=True)
-        # batch_size=config.online_opts.max_batch_size,
-        # pin_memory=True,
-        # shuffle=False,
-        # num_workers=4)
 
         references = []
         results = []
@@ -212,7 +229,11 @@ class GraphConstructionTest(unittest.TestCase):
         asr_model.encoder.freeze()
         asr_model.decoder.freeze()
         torch.cuda.cudart().cudaProfilerStart()
-        with torch.inference_mode():
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
             start_time = time.time_ns()
             for batch in data_loader:
                 torch.cuda.nvtx.range_push("batch")
@@ -234,7 +255,7 @@ class GraphConstructionTest(unittest.TestCase):
                 cpu_lengths = lengths.to(torch.int64).to('cpu')
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("beam search decoder")
-                results.extend(decoder.decode(log_probs.to(torch.float32), cpu_lengths))
+                results.extend(decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths))
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()
             end_time = time.time_ns()
@@ -247,29 +268,14 @@ class GraphConstructionTest(unittest.TestCase):
         for result in results:
             predictions.append(" ".join(piece[0] for piece in result))
         references = [s.lower() for s in references]
-        print("beam search WER:", wer(references, predictions))
+        my_wer = wer(references, predictions)
+        print("beam search WER:", my_wer)
         # print("greedy WER:", wer(references, all_greedy_predictions))
+        return my_wer[0]
 
 def write_ctm_output(key, result):
     for word, start, end in result:
         print(f"{key} 1 {start:.2f} {end - start:.2f} {word} 1.0")
-
-        # manifest = "/mnt/disks/sda_hdd/librispeech/dev_clean.json"
-        # paths = []
-        # with open(manifest) as fh:
-        #     for line in fh:
-        #         entry = json.loads(line)
-        #         paths.append(entry["audio_filepath"])
-
-        # for path in paths:
-        #     logprobs = asr_model.transcribe([path], batch_size=1, logprobs=True)
-        #     sequences = [torch.from_numpy(logprobs[0]).cuda()]
-        #     sequence_lengths = [logprobs[0].shape[0]]
-        #     padded_sequence = torch.nn.utils.rnn.pad_sequence(sequences, batch_first=True)
-        #     sequence_lengths_tensor = torch.tensor(sequence_lengths, dtype=torch.long)
-        #     for result in decoder.decode(padded_sequence,
-        #                                  sequence_lengths_tensor):
-        #         print(result)
 
 def collate_fn(batch):
     # A data tuple has the form:
