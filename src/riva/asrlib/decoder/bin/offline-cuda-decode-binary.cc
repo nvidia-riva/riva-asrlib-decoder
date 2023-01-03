@@ -150,9 +150,7 @@ main(int argc, char** argv)
     // must copy the captured variables. Otherwise, they will be lost.
     auto callback = [key, d_loglikes, &output_writer_m, &clat_writer, &ctm_output_path,
                      &word_syms = cuda_pipeline.GetSymbolTable()](
-                        std::tuple<
-                            std::optional<kaldi::CompactLattice>,
-                            std::optional<kaldi::cuda_decoder::CTMResult>>& result) {
+                        BatchedMappedOnlineDecoderCuda::ReturnType& result) {
       CU_SAFE_CALL(cudaFree(d_loglikes));
 
       if (std::get<0>(result).has_value()) {

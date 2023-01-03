@@ -43,9 +43,7 @@ BatchedMappedDecoderCuda::~BatchedMappedDecoderCuda()
 void
 BatchedMappedDecoderCuda::DecodeWithCallback(
     const float* d_logits, std::size_t logits_frame_stride, std::size_t logits_n_input_frames_valid,
-    const std::function<void(std::tuple<
-                             std::optional<kaldi::CompactLattice>,
-                             std::optional<kaldi::cuda_decoder::CTMResult>>&)>& callback)
+    const BatchedMappedOnlineDecoderCuda::LatticeCallback& callback)
 {
   UtteranceTask task;
   // at 5000 files/s, expected to overflow in ~116 million years
@@ -81,9 +79,7 @@ BatchedMappedDecoderCuda::AcquireTasks()
     auto& callback = task.callback;
 
     cuda_online_pipeline_.SetLatticeCallback(
-        task.corr_id, [this, callback](std::tuple<
-                                       std::optional<kaldi::CompactLattice>,
-                                       std::optional<kaldi::cuda_decoder::CTMResult>>& result) {
+        task.corr_id, [this, callback](BatchedMappedOnlineDecoderCuda::ReturnType& result) {
           if (callback)
             callback(result);
           n_tasks_not_done_.fetch_sub(1, std::memory_order_release);

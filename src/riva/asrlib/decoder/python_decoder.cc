@@ -261,9 +261,7 @@ PybindBatchedMappedDecoderCuda(py::module& m)
           // stride of each row is stride. Always greater than number of cols
           auto write_results =
               [i, &clat_writer, &keys](
-                  std::tuple<
-                      std::optional<kaldi::CompactLattice>,
-                      std::optional<kaldi::cuda_decoder::CTMResult>>& asr_results) {
+                  riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
               const kaldi::CompactLattice& lattice = std::get<0>(asr_results).value();
               clat_writer.Write(keys[i], lattice);
               };
@@ -278,10 +276,10 @@ PybindBatchedMappedDecoderCuda(py::module& m)
 
 
   pyclass.def(
-      "decode",
+      "decode_mbr",
       [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
          const DLManagedTensor* managed_logits_lengths)
-          -> std::vector<std::vector<std::tuple<std::string, float, float>>> {
+          -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
         // contiguousness might not mean what I think it means. It may just mean
         // stride has no padding.
 
@@ -313,7 +311,7 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         }
         // logits should be batch x time x logits
         int64_t batch_size = logits_lengths.shape[0];
-        std::vector<std::vector<std::tuple<std::string, float, float>>> results(batch_size);
+        std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
 
@@ -324,15 +322,14 @@ PybindBatchedMappedDecoderCuda(py::module& m)
           // stride of each row is stride. Always greater than number of cols
           auto place_results =
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
-                  std::tuple<
-                      std::optional<kaldi::CompactLattice>,
-                      std::optional<kaldi::cuda_decoder::CTMResult>>& asr_results) {
+                  riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
                 const kaldi::cuda_decoder::CTMResult& ctm_result = std::get<1>(asr_results).value();
                 for (size_t iword = 0; iword < ctm_result.times_seconds.size(); ++iword) {
                   results[i].emplace_back(
                       word_syms.Find(ctm_result.words[iword]),
                       ctm_result.times_seconds[iword].first,
-                      ctm_result.times_seconds[iword].second);
+                      ctm_result.times_seconds[iword].second,
+                      ctm_result.conf[iword]);
                 }
               };
           cuda_pipeline.DecodeWithCallback(
@@ -347,6 +344,75 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         cuda_pipeline.WaitForAllTasks();
         return results;
       });
+
+  pyclass.def("decode_map",
+              [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
+                 const DLManagedTensor* managed_logits_lengths, size_t n)
+              -> std::vector<std::vector<std::tuple<std::string, float, float, float>>>
+              {
+        const DLTensor& logits = managed_logits->dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
+        if (logits.ndim != 3) {
+          throw std::invalid_argument("Expected a 3D logits tensor");
+        }
+        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
+          throw std::invalid_argument("Expected a float32 logits tensor");
+        }
+        // TODO: Consider setting device id based on this... Could use RAII like
+        // in K2 for that.
+        if (logits.device.device_type != kDLCUDA) {
+          throw std::invalid_argument("Expected logits tensor to be on GPU");
+        }
+        if (logits_lengths.ndim != 1) {
+          throw std::invalid_argument("Expected a 1D logits lengths tensor");
+        }
+        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
+            logits_lengths.dtype.lanes != 1) {
+          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
+        }
+        if (logits_lengths.device.device_type != kDLCPU) {
+          throw std::invalid_argument("Expected lengths tensor to be on CPU");
+        }
+        // logits should be batch x time x logits
+        int64_t batch_size = logits_lengths.shape[0];
+        std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
+        for (int64_t i = 0; i < batch_size; ++i) {
+          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
+
+          // this may not be right... Yes, it seems quite wrong...
+          const float* single_sample_logits_start = address<float>(logits, i, 0);
+          // number of rows is number of frames
+          // number of cols is number of logits
+          // stride of each row is stride. Always greater than number of cols
+          auto place_results =
+              [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
+                  riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
+                const std::vector<kaldi::cuda_decoder::NBestResult>& nbest_results = std::get<2>(asr_results).value();
+                std::vector<
+                std::tuple<float,
+                           std::vector<std::string>,
+                           std::vector<std::pair<float, float>>
+                >> result_this_utt;
+                for (const kaldi::cuda_decoder::NBestResult& nbest_result: nbest_results) {
+                  std::vector<std::string> words; words.reserve(nbest_result.words.size());
+                  for (auto&& word_id: nbest_result.words) {
+                    words.emplace_back(word_syms.Find(word_id));
+                  }
+                  result_this_utt.emplace_back(nbest_result.score, words, std::move(nbest_result.times_seconds));
+                }
+          };
+          cuda_pipeline.DecodeWithCallback(
+              single_sample_logits_start,
+              // single_sample_logits.data_ptr<float>(),
+              stride(logits, 1),
+              // single_sample_logits.stride(1),
+              index<int64_t>(logits_lengths, i),
+              // size(0)
+              place_results);
+        }
+        cuda_pipeline.WaitForAllTasks();
+        return results;
+});
 }
 }  // anonymous namespace
 
