@@ -123,10 +123,10 @@ class TestGraphConstruction:
     # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_conformer_ctc_small
     # TODO: Investigate
     @pytest.mark.parametrize("dataset, expected_wer, half_precision",
-                             [# ("test_clean", 0.03509205721241631, False),
+                             [("test_clean", 0.03509205721241631, False),
                               ("test_clean", 0.035263237979306146, True),
-                              # Causes a crash when I run twice...
-                              # ("test_other", 0.07034369447681639, False)
+                              ("test_other", 0.07034369447681639, False),
+                              ("test_other", 0.0706302657470913, True)
                              ])
     def test_vanilla_ctc_topo(self, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, "ctc")
@@ -134,6 +134,62 @@ class TestGraphConstruction:
         wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision)
         assert wer <= expected_wer
 
+    def test_delete_decoder(self):
+        """Ensure that allocating a decoder, decoding with it, deleting it,
+        and then reallocating a new one, and deocding with that one,
+        does not crash.
+        """
+        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+        torch.cuda.cudart().cudaProfilerStart()
+
+        work_dir = os.path.join(self.temp_dir, "ctc")
+
+        decoder1_config = self.create_decoder_config()
+        decoder2_config = self.create_decoder_config()
+
+        data_loader = torch.utils.data.DataLoader(
+            self.dataset_map["test_clean"],
+            batch_size=decoder1_config.online_opts.max_batch_size,
+            # num_workers=1,
+            collate_fn=collate_fn,
+            pin_memory=True)
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            for batch in data_loader:
+                input_signal, input_signal_length, target = batch
+                input_signal = input_signal.cuda()
+                input_signal_length = input_signal_length.cuda()
+                log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                cpu_lengths = lengths.to(torch.int64).to('cpu')
+
+                decoder1 = BatchedMappedDecoderCuda(
+                    decoder1_config,
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+                    self.num_tokens_including_blank
+                )
+
+                decoder1.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
+
+                del decoder1
+
+                decoder2 = BatchedMappedDecoderCuda(
+                    decoder2_config,
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+                    self.num_tokens_including_blank
+                )
+                decoder2.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
+                break
+
+        torch.cuda.cudart().cudaProfilerStop()
     def test_compact_ctc_topo(self):
         self.create_TLG("ctc_compact", os.path.join(self.temp_dir, "ctc_compact"))
 
@@ -193,7 +249,7 @@ class TestGraphConstruction:
         config.online_opts.lattice_postprocessor_opts.acoustic_scale = 10.0
         config.online_opts.lattice_postprocessor_opts.lm_scale = 6.0
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
-        config.online_opts.num_decoder_copy_threads = 1
+        config.online_opts.num_decoder_copy_threads = 2
         config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
 
         return config
