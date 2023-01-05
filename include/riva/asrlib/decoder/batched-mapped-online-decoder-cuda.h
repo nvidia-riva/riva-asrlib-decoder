@@ -20,6 +20,7 @@
 #include <cudadecoder/cuda-decoder-common.h>
 #include <cudadecoder/cuda-decoder.h>
 #include <cudadecoder/lattice-postprocessor.h>
+#include <optional>
 #include <fstext/lattice-utils.h>
 #include <itf/options-itf.h>
 #include <itf/transition-information.h>
