@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+# os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
+
 import gzip
 from contextlib import ExitStack
 import json
@@ -40,12 +43,36 @@ from tqdm import tqdm
 import riva.asrlib.decoder
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
+from torch.utils.data import Dataset, Subset
+
+# torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
+# torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+
+# Not as good as it could be. Doesn't support num_workers > 0. And
+# that's hard to support because of multiprocessing, unfortunately.
+class CacheDataset(Dataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.cache = {}
+
+    def __getitem__(self, n: int):
+        if n not in self.cache:
+            result = self.dataset[n]
+            self.cache[n] = result
+        return self.cache[n]
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
 class TestGraphConstruction:
     @pytest.fixture(autouse=True)
     def setup(self):
-        # return_type = namedtuple(["temp_dir", "words_path", "gzipped_lm_path", "nemo_model_path", "units_txt", "num_tokens_including_blank", "dataset_map"])
         self.temp_dir = os.path.abspath("tmp_graph_construction")
         os.makedirs(self.temp_dir, exist_ok=True)
+        # self.wfst_dir = os.path.join(self.temp_dir, "wfst")
+        # os.makedirs(self.wfst_dir, exist_ok=True)
+        # self.am_dir = os.path.join(self.temp_dir, "am")
+        # os.makedirs(self.am_dir, exist_ok=True)
 
         lm_zip_file = os.path.join(self.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
@@ -108,12 +135,23 @@ class TestGraphConstruction:
         self.num_tokens_including_blank = len(data["decoder"]["vocabulary"]) + 1
         assert self.num_tokens_including_blank == 1025
 
-        librispeech_test_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True)
-        librispeech_test_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)
-        self.dataset_map = {
-            "test_clean": librispeech_test_clean,
-            "test_other": librispeech_test_other,
-        }
+        librispeech_test_clean = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True))
+        librispeech_test_other = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True))
+
+        self.dataset_map = {}
+
+        for key, dataset in (("test_clean", librispeech_test_clean),
+                             ("test_other", librispeech_test_other)):
+            lengths = []
+            for i in range(len(dataset)):
+                waveform, *_ = dataset[i]
+                lengths.append(waveform.size(1))
+            sorted_indices = list(np.argsort(lengths))
+            self.dataset_map[key] = Subset(dataset, sorted_indices)
+        # self.dataset_map = {
+        #     "test_clean": librispeech_test_clean,
+        #     "test_other": librispeech_test_other,
+        # }
 
 
     def test_eesen_ctc_topo(self):
@@ -121,7 +159,8 @@ class TestGraphConstruction:
 
     # TODO: Debug why these WERs are a bit higher than the ones reported here for "N-gram LM"
     # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_conformer_ctc_small
-    # TODO: Investigate
+    # The reason is probably that the language model is not the same. The NeMo LM is trained
+    # on the Librispeech training text as well.
     @pytest.mark.parametrize("dataset, expected_wer, half_precision",
                              [("test_clean", 0.03509205721241631, False),
                               ("test_clean", 0.035263237979306146, True),
@@ -133,6 +172,9 @@ class TestGraphConstruction:
         # self.create_TLG("ctc", work_dir)
         wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision)
         assert wer <= expected_wer
+
+        self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 10)
+        print("GALVEZ:wer=", wer)
 
     def test_delete_decoder(self):
         """Ensure that allocating a decoder, decoding with it, deleting it,
@@ -156,7 +198,6 @@ class TestGraphConstruction:
         data_loader = torch.utils.data.DataLoader(
             self.dataset_map["test_clean"],
             batch_size=decoder1_config.online_opts.max_batch_size,
-            # num_workers=1,
             collate_fn=collate_fn,
             pin_memory=True)
 
@@ -243,7 +284,7 @@ class TestGraphConstruction:
         # config.online_opts.decoder_opts.blank_ilabel = 1024
         # config.online_opts.decoder_opts.length_penalty = -4.5
         config.online_opts.determinize_lattice = True
-        config.online_opts.max_batch_size = 200
+        config.online_opts.max_batch_size = 160
         config.online_opts.num_channels = config.online_opts.max_batch_size * 2
         config.online_opts.frame_shift_seconds = 0.04
         config.online_opts.lattice_postprocessor_opts.acoustic_scale = 10.0
@@ -268,7 +309,7 @@ class TestGraphConstruction:
         data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=config.online_opts.num_channels,
-            # num_workers=1,
+            num_workers=0,
             collate_fn=collate_fn,
             pin_memory=True)
 
@@ -284,7 +325,6 @@ class TestGraphConstruction:
         asr_model.eval()
         asr_model.encoder.freeze()
         asr_model.decoder.freeze()
-        torch.cuda.cudart().cudaProfilerStart()
 
         with ExitStack() as stack:
             stack.enter_context(torch.inference_mode())
@@ -315,11 +355,10 @@ class TestGraphConstruction:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()
             end_time = time.time_ns()
-        torch.cuda.cudart().cudaProfilerStop()
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
-        print("RTFx:", input_time_seconds / run_time_seconds)
-        print("run time:", run_time_seconds)
+        # print("RTFx:", input_time_seconds / run_time_seconds)
+        # print("run time:", run_time_seconds)
         predictions = []
         for result in results:
             predictions.append(" ".join(piece[0] for piece in result))
@@ -329,6 +368,75 @@ class TestGraphConstruction:
         # print("greedy WER:", wer(references, all_greedy_predictions))
         return my_wer[0]
 
+    def run_decoder_throughput(self, graph_path: str, dataset: torch.utils.data.IterableDataset,
+                               half_precision: bool, warmup_iters: int, benchmark_iters: int):
+        assert warmup_iters > 0
+        assert benchmark_iters > 0
+        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+
+        config = self.create_decoder_config()
+        decoder = BatchedMappedDecoderCuda(
+            config,
+            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            self.num_tokens_including_blank
+        )
+
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=config.online_opts.num_channels,
+            num_workers=0,
+            collate_fn=collate_fn,
+            pin_memory=True)
+
+        total_audio_length_samples = 0
+
+        # wer = torchmetrics.WordErrorRate()
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        # from torch._jit_internal import FunctionModifiers
+        # asr_model.preprocessor.forward._torchscript_modifier = FunctionModifiers.IGNORE #  torch.jit.ignore(asr_model.preprocessor.forward)
+        # asr_model.encoder = torch.jit.script(asr_model.encoder)
+        # asr_model.decoder = torch.jit.script(asr_model.decoder)
+
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+
+            for i in range(warmup_iters + benchmark_iters):
+                if i == warmup_iters:
+                    start_time = time.time_ns()
+                    torch.cuda.cudart().cudaProfilerStart()
+                torch.cuda.nvtx.range_push("iteration")
+                for batch in data_loader:
+                    torch.cuda.nvtx.range_push("single batch")
+                    input_signal, input_signal_length, target = batch
+                    if i == 0:
+                        total_audio_length_samples += torch.sum(input_signal_length) * benchmark_iters
+                    input_signal = input_signal.cuda()
+                    input_signal_length = input_signal_length.cuda()
+                    torch.cuda.nvtx.range_push("ASR model")
+                    log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                    torch.cuda.nvtx.range_pop()
+                    cpu_lengths = lengths.to(torch.int64).to('cpu')
+                    torch.cuda.nvtx.range_push("decoder")
+                    decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
+                    torch.cuda.nvtx.range_pop()
+                    torch.cuda.nvtx.range_pop()
+                end_time = time.time_ns()
+                torch.cuda.nvtx.range_pop() # iteration
+        run_time_seconds = (end_time - start_time) / 1_000_000_000
+        input_time_seconds = total_audio_length_samples / 16_000
+        print("RTFx:", input_time_seconds / run_time_seconds)
+        print("run time:", run_time_seconds)
+        torch.cuda.cudart().cudaProfilerStop()
+    
 def write_ctm_output(key, result):
     for word, start, end in result:
         print(f"{key} 1 {start:.2f} {end - start:.2f} {word} 1.0")
