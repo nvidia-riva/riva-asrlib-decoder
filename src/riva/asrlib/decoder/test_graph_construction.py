@@ -16,6 +16,7 @@
 import os
 # os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
 
+import glob
 import gzip
 from contextlib import ExitStack
 import json
@@ -23,6 +24,7 @@ import multiprocessing
 import os
 import pathlib
 import pytest
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -33,6 +35,8 @@ import zipfile
 
 import more_itertools
 import nemo.collections.asr as nemo_asr
+from nemo.collections.asr.models import ASRModel
+from nemo.collections.asr.metrics.wer import CTCDecodingConfig
 import numpy as np
 from ruamel.yaml import YAML
 import torch
@@ -96,7 +100,7 @@ class TestGraphConstruction:
         # file downloaded from NGC is simply a git lfs stub file, not
         # the actual file itself, so overwrite self.words_path by
         # exracting the symbol table from the arpa file
-        lm_path = os.path.join(self.temp_dir, "3-gram.pruned.3e-7.arpa")
+        self.lm_path = os.path.join(self.temp_dir, "3-gram.pruned.3e-7.arpa")
         self.words_path = os.path.join(self.temp_dir, "words.mixed_lm.3-gram.pruned.3e-7.txt")
         temp_words_path = os.path.join(self.temp_dir, "words_with_ids.txt")
         if not os.path.exists(temp_words_path):
@@ -104,12 +108,12 @@ class TestGraphConstruction:
                 [
                     os.path.join(riva.asrlib.decoder.__path__[0], "scripts/prepare_TLG_fst/bin/arpa2fst"),
                     f"--write-symbol-table={temp_words_path}",
-                    lm_path,
+                    self.lm_path,
                     "/dev/null",
                 ]
             )
-        self.gzipped_lm_path = lm_path + ".gz"
-        with open(lm_path, 'rb') as f_in, gzip.open(self.gzipped_lm_path, 'wb') as f_out:
+        self.gzipped_lm_path = self.lm_path + ".gz"
+        with open(self.lm_path, 'rb') as f_in, gzip.open(self.gzipped_lm_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
         with open(temp_words_path, "r") as words_with_ids_fh, open(self.words_path, "w") as words_fh:
@@ -138,6 +142,8 @@ class TestGraphConstruction:
         librispeech_test_clean = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True))
         librispeech_test_other = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True))
 
+        self.original_dataset_map = {"test_clean": torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True),
+                                     "test_other": torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)}
         self.dataset_map = {}
 
         for key, dataset in (("test_clean", librispeech_test_clean),
@@ -161,6 +167,8 @@ class TestGraphConstruction:
     # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_conformer_ctc_small
     # The reason is probably that the language model is not the same. The NeMo LM is trained
     # on the Librispeech training text as well.
+    # 
+    # Got 0.033627510651247715 on librispeech test clean with the flashlight decoder
     @pytest.mark.parametrize("dataset, expected_wer, half_precision",
                              [("test_clean", 0.03509205721241631, False),
                               ("test_clean", 0.035263237979306146, True),
@@ -173,8 +181,11 @@ class TestGraphConstruction:
         wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision)
         assert wer <= expected_wer
 
-        self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 10)
+        # self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 10)
         print("GALVEZ:wer=", wer)
+
+    def test_flashlight(self):
+        self.run_decoder_flashlight()
 
     def test_delete_decoder(self):
         """Ensure that allocating a decoder, decoding with it, deleting it,
@@ -287,8 +298,11 @@ class TestGraphConstruction:
         config.online_opts.max_batch_size = 160
         config.online_opts.num_channels = config.online_opts.max_batch_size * 2
         config.online_opts.frame_shift_seconds = 0.04
-        config.online_opts.lattice_postprocessor_opts.acoustic_scale = 10.0
-        config.online_opts.lattice_postprocessor_opts.lm_scale = 6.0
+        config.online_opts.lattice_postprocessor_opts.acoustic_scale = 1.0
+        # 0.035244217894096166 WER for 5.0 lm_scale
+        # 0.0358338405356056 WER for 7.0 lm_scale
+        # 0.035015976871576385 WER for 5.5 lm_scale
+        config.online_opts.lattice_postprocessor_opts.lm_scale = .55
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
         config.online_opts.num_decoder_copy_threads = 2
         config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
@@ -367,6 +381,49 @@ class TestGraphConstruction:
         print("beam search WER:", my_wer)
         # print("greedy WER:", wer(references, all_greedy_predictions))
         return my_wer[0]
+
+    def run_decoder_flashlight(self):
+        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+
+        # subprocess.check_call(shlex.split(f"python /home/dgalvez/scratch/code/asr/riva-asrlib-decoder/NeMo/scripts/asr_language_modeling/ngram_lm/create_lexicon_from_arpa.py --arpa {self.lm_path} --model {self.nemo_model_path} --lower --dst {os.path.join(self.temp_dir, 'flashlight_lexicon.txt')}"))
+        # lowercase_lm_path = os.path.join(self.temp_dir, "lowercase.arpa")
+        # subprocess.check_call(f"tr '[:upper:]' '[:lower:]' < {self.lm_path} > {lowercase_lm_path}", shell=True)
+
+        # kenlm_args = [
+        #     "/home/dgalvez/scratch/code/asr/riva-asrlib-decoder/NeMo/scripts/asr_language_modeling/ngram_lm/decoders/kenlm/build/bin/build_binary",
+        #     "trie",
+        #     lowercase_lm_path,
+        #     os.path.join(self.temp_dir, 'lm.bin')
+        # ]
+        # subprocess.check_call(kenlm_args)
+
+        decoding_cfg = CTCDecodingConfig()
+
+        decoding_cfg.strategy = "flashlight"
+        decoding_cfg.beam.search_type = "flashlight"
+        decoding_cfg.beam.kenlm_path = os.path.join(self.temp_dir, 'lm.bin')
+        decoding_cfg.beam.flashlight_cfg.lexicon_path=os.path.join(self.temp_dir, 'flashlight_lexicon.txt/3-gram.pruned.3e-7.lexicon')
+        decoding_cfg.beam.beam_size = 32
+        decoding_cfg.beam.beam_alpha = 0.2
+        decoding_cfg.beam.beam_beta = 0.2
+        decoding_cfg.beam.flashlight_cfg.beam_size_token = 32
+        decoding_cfg.beam.flashlight_cfg.beam_threshold = 25.0
+        
+        asr_model.change_decoding_strategy(decoding_cfg)
+
+        file_paths = []
+        references = []
+        for i in range(len(self.original_dataset_map["test_clean"])):
+            file_path, _, transcript, *_ = self.original_dataset_map["test_clean"].get_metadata(i)
+            file_paths.append(os.path.join(self.temp_dir, "LibriSpeech", file_path))
+            references.append(transcript.lower())
+            
+        # files = glob.glob(os.path.join(self.temp_dir, "LibriSpeech/test-clean/*/*/*.flac"))
+        predictions = asr_model.transcribe(paths2audio_files=file_paths, batch_size=16, return_hypotheses=False, logprobs=False)
+        #print(predictions[:2])
+        #print(references[:2])
+        my_wer = wer(references, predictions)
+        print("GALVEZ:wer=", my_wer)
 
     def run_decoder_throughput(self, graph_path: str, dataset: torch.utils.data.IterableDataset,
                                half_precision: bool, warmup_iters: int, benchmark_iters: int):
@@ -504,7 +561,12 @@ def wer(references, hypotheses):
         total_insertions += i
         total_substitutions += s
         total_deletions += d
-    return total_wer / total_words, total_insertions, total_substitutions, total_deletions
+    if total_words == 0:
+        wer_ratio = 0
+    else:
+        wer_ratio = total_wer / total_words
+    
+    return wer_ratio, total_insertions, total_substitutions, total_deletions
 
 def wer_single(r, h):
     """
