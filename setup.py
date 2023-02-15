@@ -58,11 +58,12 @@ class BuildExtension(build_ext):
         #     print(f'Setting PYTHON_EXECUTABLE to {sys.executable}')
         #     cmake_args += f' -DPYTHON_EXECUTABLE={sys.executable}'
 
+        # TODO: Remove this dead code
         openfst_binaries = [f"fst{operation}" for operation in "arcsort closure compile concat connect convert determinize disambiguate encode epsnormalize equal equivalent invert isomorphic map minimize project prune push randgen relabel replace reverse reweight synchronize topsort union".split(" ")]
         fst_binaries = "arpa2fst arpa-to-const-arpa fstdeterminizestar fstrmsymbols fstisstochastic fstminimizeencoded fstmakecontextfst fstmakecontextsyms fstaddsubsequentialloop fstaddselfloops fstrmepslocal fstcomposecontext fsttablecompose fstrand fstdeterminizelog fstphicompose fstcopy fstpushspecial fsts-to-transcripts fsts-project fsts-union fsts-concat transcripts-to-fsts".split(" ")
         fst_binaries.extend(openfst_binaries)
         # ERROR to fix: "fstcompose" is used in mkgraph_ctc.sh...
-        fst_binaries = ["arpa2fst", "fsttablecompose", "fstdeterminizestar", "fstminimizeencoded", "fstarcsort", "fstcompile", "fstaddselfloops", "transcripts-to-fsts", "fstconvert"]
+        fst_binaries = ["arpa2fst", "fsttablecompose", "fstdeterminizestar", "fstminimizeencoded", "fstarcsort", "fstcompile", "fstaddselfloops", "transcripts-to-fsts", "fstconvert", "fstisstochastic", "fstcompose", "fstrmepslocal"]
         build_cmd = f'''
         cd {self.build_temp}
         

@@ -80,7 +80,7 @@ if(NOT openfst_POPULATED)
     )
   target_link_libraries(fstscript_base PUBLIC riva_asrlib_openfst ${CMAKE_DL_LIBS} $<TARGET_OBJECTS:fst-types>)
 
-  foreach(operation arcsort closure compile concat connect convert decode determinize disambiguate encode epsnormalize equal equivalent invert isomorphic map minimize project prune push randequivalent randgen relabel replace reverse reweight synchronize topsort union)
+  foreach(operation arcsort closure compile compose concat connect convert decode determinize disambiguate encode epsnormalize equal equivalent invert isomorphic map minimize project prune push randequivalent randgen relabel replace reverse reweight synchronize topsort union)
     # decode verify
     add_library("fstscript_${operation}" "${openfst_SOURCE_DIR}/src/script/${operation}.cc")
     target_link_libraries("fstscript_${operation}" PUBLIC fstscript_base)
