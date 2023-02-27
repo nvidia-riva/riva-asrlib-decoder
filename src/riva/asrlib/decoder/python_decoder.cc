@@ -71,6 +71,9 @@ PybindCudaDecoderConfig(py::module& m)
   pyclass.def_readwrite("aux_q_capacity", &PyClass::aux_q_capacity);
   pyclass.def_readwrite("max_active", &PyClass::max_active);
   pyclass.def_readwrite("endpointing_config", &PyClass::endpointing_config);
+  pyclass.def_readwrite("blank_penalty", &PyClass::blank_penalty);
+  pyclass.def_readwrite("blank_ilabel", &PyClass::blank_ilabel);
+  pyclass.def_readwrite("length_penalty", &PyClass::length_penalty);
 }
 
 void
@@ -122,6 +125,7 @@ PybindLatticePostprocessorConfig(py::module& m)
   pyclass.def_readwrite("acoustic2lm_scale", &PyClass::acoustic2lm_scale);
   pyclass.def_readwrite("lm2acoustic_scale", &PyClass::lm2acoustic_scale);
   pyclass.def_readwrite("word_ins_penalty", &PyClass::word_ins_penalty);
+  pyclass.def_readwrite("nbest", &PyClass::nbest);
 }
 
 void
@@ -347,8 +351,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
 
   pyclass.def("decode_map",
               [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
-                 const DLManagedTensor* managed_logits_lengths, size_t n)
-              -> std::vector<std::vector<std::tuple<std::string, float, float, float>>>
+                 const DLManagedTensor* managed_logits_lengths)
+              -> std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
               {
         const DLTensor& logits = managed_logits->dl_tensor;
         const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
@@ -375,7 +379,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         }
         // logits should be batch x time x logits
         int64_t batch_size = logits_lengths.shape[0];
-        std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
+        // batch, nbest result, words with times
+        std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
 
@@ -388,18 +393,24 @@ PybindBatchedMappedDecoderCuda(py::module& m)
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
                 const std::vector<kaldi::cuda_decoder::NBestResult>& nbest_results = std::get<2>(asr_results).value();
+                // this type doesn't match results above
                 std::vector<
-                std::tuple<float,
-                           std::vector<std::string>,
-                           std::vector<std::pair<float, float>>
+                std::tuple<float, // score
+                std::vector<std::tuple<std::string, float, float>>
                 >> result_this_utt;
                 for (const kaldi::cuda_decoder::NBestResult& nbest_result: nbest_results) {
-                  std::vector<std::string> words; words.reserve(nbest_result.words.size());
+                  std::vector<std::tuple<std::string, float, float>> words; words.reserve(nbest_result.words.size());
+                  std::size_t i = 0;
                   for (auto&& word_id: nbest_result.words) {
-                    words.emplace_back(word_syms.Find(word_id));
+                    words.emplace_back(word_syms.Find(word_id),
+                                       nbest_result.times_seconds[i].first,
+                                       nbest_result.times_seconds[i].second);
+                    ++i;
                   }
-                  result_this_utt.emplace_back(nbest_result.score, words, std::move(nbest_result.times_seconds));
+                  result_this_utt.emplace_back(nbest_result.score, words);
                 }
+
+                results[i] = std::move(result_this_utt);
           };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start,
