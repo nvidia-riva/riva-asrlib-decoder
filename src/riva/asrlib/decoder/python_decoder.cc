@@ -14,201 +14,167 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <pybind11/pybind11.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/bind_vector.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/vector.h>
 
 #include <stdexcept>
 
 #include "riva/asrlib/decoder/batched-mapped-decoder-cuda.h"
 #include "riva/asrlib/decoder/ctc_transition_information.h"
-#include "riva/asrlib/decoder/pybind11_dlpack_caster.h"
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
-using namespace pybind11::literals;
+using namespace nb::literals;
 
 namespace {
 
 void
-PybindOnlineEndpointRule(py::module& m)
+PybindOnlineEndpointRule(nb::module_& m)
 {
   using PyClass = kaldi::OnlineEndpointRule;
-  py::class_<PyClass> pyclass(m, "OnlineEndpointRule");
+  nb::class_<PyClass> pyclass(m, "OnlineEndpointRule");
   pyclass.def(
-      py::init<bool, float, float, float>(), "must_contain_nonsilence"_a = true,
+      nb::init<bool, float, float, float>(), "must_contain_nonsilence"_a = true,
       "min_trailing_silence"_a = 1.0,
       "max_relative_cost"_a = std::numeric_limits<float>::infinity(),
       "min_utterance_length"_a = 0.0);
-  pyclass.def_readwrite("must_contain_nonsilence", &PyClass::must_contain_nonsilence);
-  pyclass.def_readwrite("min_trailing_silence", &PyClass::min_trailing_silence);
-  pyclass.def_readwrite("max_relative_cost", &PyClass::max_relative_cost);
-  pyclass.def_readwrite("min_utterance_length", &PyClass::min_utterance_length);
+  pyclass.def_rw("must_contain_nonsilence", &PyClass::must_contain_nonsilence);
+  pyclass.def_rw("min_trailing_silence", &PyClass::min_trailing_silence);
+  pyclass.def_rw("max_relative_cost", &PyClass::max_relative_cost);
+  pyclass.def_rw("min_utterance_length", &PyClass::min_utterance_length);
 }
 
 void
-PybindOnlineEndpointConfig(py::module& m)
+PybindOnlineEndpointConfig(nb::module_& m)
 {
   using PyClass = kaldi::OnlineEndpointConfig;
-  py::class_<PyClass> pyclass(m, "OnlineEndpointConfig");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("silence_phones", &PyClass::silence_phones);
-  pyclass.def_readwrite("rule1", &PyClass::rule1);
-  pyclass.def_readwrite("rule2", &PyClass::rule2);
-  pyclass.def_readwrite("rule3", &PyClass::rule3);
-  pyclass.def_readwrite("rule4", &PyClass::rule4);
-  pyclass.def_readwrite("rule5", &PyClass::rule5);
+  nb::class_<PyClass> pyclass(m, "OnlineEndpointConfig");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("silence_phones", &PyClass::silence_phones);
+  pyclass.def_rw("rule1", &PyClass::rule1);
+  pyclass.def_rw("rule2", &PyClass::rule2);
+  pyclass.def_rw("rule3", &PyClass::rule3);
+  pyclass.def_rw("rule4", &PyClass::rule4);
+  pyclass.def_rw("rule5", &PyClass::rule5);
 }
 
 void
-PybindCudaDecoderConfig(py::module& m)
+PybindCudaDecoderConfig(nb::module_& m)
 {
   using PyClass = kaldi::cuda_decoder::CudaDecoderConfig;
-  py::class_<PyClass> pyclass(m, "CudaDecoderConfig");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("default_beam", &PyClass::default_beam);
-  pyclass.def_readwrite("lattice_beam", &PyClass::lattice_beam);
-  pyclass.def_readwrite("ntokens_pre_allocated", &PyClass::ntokens_pre_allocated);
-  pyclass.def_readwrite("main_q_capacity", &PyClass::main_q_capacity);
-  pyclass.def_readwrite("aux_q_capacity", &PyClass::aux_q_capacity);
-  pyclass.def_readwrite("max_active", &PyClass::max_active);
-  pyclass.def_readwrite("endpointing_config", &PyClass::endpointing_config);
-  pyclass.def_readwrite("blank_penalty", &PyClass::blank_penalty);
-  pyclass.def_readwrite("blank_ilabel", &PyClass::blank_ilabel);
-  pyclass.def_readwrite("length_penalty", &PyClass::length_penalty);
+  nb::class_<PyClass> pyclass(m, "CudaDecoderConfig");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("default_beam", &PyClass::default_beam);
+  pyclass.def_rw("lattice_beam", &PyClass::lattice_beam);
+  pyclass.def_rw("ntokens_pre_allocated", &PyClass::ntokens_pre_allocated);
+  pyclass.def_rw("main_q_capacity", &PyClass::main_q_capacity);
+  pyclass.def_rw("aux_q_capacity", &PyClass::aux_q_capacity);
+  pyclass.def_rw("max_active", &PyClass::max_active);
+  pyclass.def_rw("endpointing_config", &PyClass::endpointing_config);
+  pyclass.def_rw("blank_penalty", &PyClass::blank_penalty);
+  pyclass.def_rw("blank_ilabel", &PyClass::blank_ilabel);
+  pyclass.def_rw("length_penalty", &PyClass::length_penalty);
 }
 
 void
-PybindDeterminizeLatticePhonePrunedOptions(py::module& m)
+PybindDeterminizeLatticePhonePrunedOptions(nb::module_& m)
 {
   using PyClass = fst::DeterminizeLatticePhonePrunedOptions;
-  py::class_<PyClass> pyclass(m, "DeterminizeLatticePhonePrunedOptions");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("delta", &PyClass::delta);
-  pyclass.def_readwrite("max_mem", &PyClass::max_mem);
-  pyclass.def_readwrite("phone_determinize", &PyClass::phone_determinize);
-  pyclass.def_readwrite("word_determinize", &PyClass::word_determinize);
-  pyclass.def_readwrite("minimize", &PyClass::minimize);
+  nb::class_<PyClass> pyclass(m, "DeterminizeLatticePhonePrunedOptions");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("delta", &PyClass::delta);
+  pyclass.def_rw("max_mem", &PyClass::max_mem);
+  pyclass.def_rw("phone_determinize", &PyClass::phone_determinize);
+  pyclass.def_rw("word_determinize", &PyClass::word_determinize);
+  pyclass.def_rw("minimize", &PyClass::minimize);
 }
 
 void
-PybindMinimumBayesRiskOptions(py::module& m)
+PybindMinimumBayesRiskOptions(nb::module_& m)
 {
   using PyClass = kaldi::MinimumBayesRiskOptions;
-  py::class_<PyClass> pyclass(m, "MinimumBayesRiskOptions");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("decode_mbr", &PyClass::decode_mbr);
-  pyclass.def_readwrite("print_silence", &PyClass::print_silence);
+  nb::class_<PyClass> pyclass(m, "MinimumBayesRiskOptions");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("decode_mbr", &PyClass::decode_mbr);
+  pyclass.def_rw("print_silence", &PyClass::print_silence);
 }
 
 void
-PybindWordBoundaryInfoNewOpts(py::module& m)
+PybindWordBoundaryInfoNewOpts(nb::module_& m)
 {
   using PyClass = kaldi::WordBoundaryInfoNewOpts;
-  py::class_<PyClass> pyclass(m, "WordBoundaryInfoNewOpts");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("silence_label", &PyClass::silence_label);
-  pyclass.def_readwrite("partial_word_label", &PyClass::partial_word_label);
-  pyclass.def_readwrite("reorder", &PyClass::reorder);
+  nb::class_<PyClass> pyclass(m, "WordBoundaryInfoNewOpts");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("silence_label", &PyClass::silence_label);
+  pyclass.def_rw("partial_word_label", &PyClass::partial_word_label);
+  pyclass.def_rw("reorder", &PyClass::reorder);
 }
 
 void
-PybindLatticePostprocessorConfig(py::module& m)
+PybindLatticePostprocessorConfig(nb::module_& m)
 {
   using PyClass = kaldi::cuda_decoder::LatticePostprocessorConfig;
-  py::class_<PyClass> pyclass(m, "LatticePostprocessorConfig");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("word_boundary_rxfilename", &PyClass::word_boundary_rxfilename);
-  pyclass.def_readwrite("mbr_opts", &PyClass::mbr_opts);
-  pyclass.def_readwrite("wip_opts", &PyClass::wip_opts);
-  pyclass.def_readwrite("max_expand", &PyClass::max_expand);
-  pyclass.def_readwrite("acoustic_scale", &PyClass::acoustic_scale);
-  pyclass.def_readwrite("lm_scale", &PyClass::lm_scale);
-  pyclass.def_readwrite("acoustic2lm_scale", &PyClass::acoustic2lm_scale);
-  pyclass.def_readwrite("lm2acoustic_scale", &PyClass::lm2acoustic_scale);
-  pyclass.def_readwrite("word_ins_penalty", &PyClass::word_ins_penalty);
-  pyclass.def_readwrite("nbest", &PyClass::nbest);
+  nb::class_<PyClass> pyclass(m, "LatticePostprocessorConfig");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("word_boundary_rxfilename", &PyClass::word_boundary_rxfilename);
+  pyclass.def_rw("mbr_opts", &PyClass::mbr_opts);
+  pyclass.def_rw("wip_opts", &PyClass::wip_opts);
+  pyclass.def_rw("max_expand", &PyClass::max_expand);
+  pyclass.def_rw("acoustic_scale", &PyClass::acoustic_scale);
+  pyclass.def_rw("lm_scale", &PyClass::lm_scale);
+  pyclass.def_rw("acoustic2lm_scale", &PyClass::acoustic2lm_scale);
+  pyclass.def_rw("lm2acoustic_scale", &PyClass::lm2acoustic_scale);
+  pyclass.def_rw("word_ins_penalty", &PyClass::word_ins_penalty);
+  pyclass.def_rw("nbest", &PyClass::nbest);
 }
 
 void
-PybindBatchedMappedOnlineDecoderCudaConfig(py::module& m)
+PybindBatchedMappedOnlineDecoderCudaConfig(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedOnlineDecoderCudaConfig;
-  py::class_<PyClass> pyclass(m, "BatchedMappedOnlineDecoderCudaConfig");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("max_batch_size", &PyClass::max_batch_size);
-  pyclass.def_readwrite("num_channels", &PyClass::num_channels);
-  pyclass.def_readwrite(
+  nb::class_<PyClass> pyclass(m, "BatchedMappedOnlineDecoderCudaConfig");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("max_batch_size", &PyClass::max_batch_size);
+  pyclass.def_rw("num_channels", &PyClass::num_channels);
+  pyclass.def_rw(
       "num_post_processing_worker_threads", &PyClass::num_post_processing_worker_threads);
-  pyclass.def_readwrite("determinize_lattice", &PyClass::determinize_lattice);
-  pyclass.def_readwrite("num_decoder_copy_threads", &PyClass::num_decoder_copy_threads);
-  pyclass.def_readwrite("frame_shift_seconds", &PyClass::frame_shift_seconds);
-  pyclass.def_readwrite("decoder_opts", &PyClass::decoder_opts);
-  pyclass.def_readwrite("det_opts", &PyClass::det_opts);
-  pyclass.def_readwrite("lattice_postprocessor_opts", &PyClass::lattice_postprocessor_opts);
-  pyclass.def_readwrite("use_lattice_postprocessor", &PyClass::use_lattice_postprocessor);
-}
-
-int64_t
-stride(const DLTensor& tensor, const std::size_t dim)
-{
-  if (tensor.strides != nullptr) {
-    return tensor.strides[dim];
-  } else {
-    int64_t result = 1;
-    for (int32_t iter_dim = tensor.ndim - 1; iter_dim > dim; --iter_dim) {
-      result *= tensor.shape[iter_dim];
-    }
-    return result;
-  }
-}
-
-template <typename T>
-const T*
-address(const DLTensor& tensor, std::size_t index0, std::size_t index1)
-{
-  return reinterpret_cast<const T*>(
-             reinterpret_cast<const char*>(tensor.data) + tensor.byte_offset) +
-         index0 * stride(tensor, 0) + index1 * stride(tensor, 1);
-}
-
-template <typename T>
-const T*
-address(const DLTensor& tensor, std::size_t index)
-{
-  return reinterpret_cast<const T*>(
-             reinterpret_cast<const char*>(tensor.data) + tensor.byte_offset) +
-         index;
-}
-
-template <typename T>
-T
-index(const DLTensor& tensor, std::size_t index)
-{
-  return *address<T>(tensor, index);
+  pyclass.def_rw("determinize_lattice", &PyClass::determinize_lattice);
+  pyclass.def_rw("num_decoder_copy_threads", &PyClass::num_decoder_copy_threads);
+  pyclass.def_rw("frame_shift_seconds", &PyClass::frame_shift_seconds);
+  pyclass.def_rw("decoder_opts", &PyClass::decoder_opts);
+  pyclass.def_rw("det_opts", &PyClass::det_opts);
+  pyclass.def_rw("lattice_postprocessor_opts", &PyClass::lattice_postprocessor_opts);
+  pyclass.def_rw("use_lattice_postprocessor", &PyClass::use_lattice_postprocessor);
 }
 
 void
-PybindBatchedMappedDecoderCudaConfig(py::module& m)
+PybindBatchedMappedDecoderCudaConfig(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedDecoderCudaConfig;
-  py::class_<PyClass> pyclass(m, "BatchedMappedDecoderCudaConfig");
-  pyclass.def(py::init<>());
-  pyclass.def_readwrite("online_opts", &PyClass::online_opts);
-  pyclass.def_readwrite("n_input_per_chunk", &PyClass::n_input_per_chunk);
+  nb::class_<PyClass> pyclass(m, "BatchedMappedDecoderCudaConfig");
+  pyclass.def(nb::init<>());
+  pyclass.def_rw("online_opts", &PyClass::online_opts);
+  pyclass.def_rw("n_input_per_chunk", &PyClass::n_input_per_chunk);
 }
 
 void
-PybindBatchedMappedDecoderCuda(py::module& m)
+PybindBatchedMappedDecoderCuda(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedDecoderCuda;
-  py::class_<PyClass> pyclass(m, "BatchedMappedDecoderCuda");
+  nb::class_<PyClass> pyclass(m, "BatchedMappedDecoderCuda");
   // Need to wrap fsts somehow, or make the user provide paths to them on disk.
   // Paths on disk might be a better start.
   // ot sure how pybind11 interacts with cython or whatever openfst uses...
   // pywrapfst
-  // pyclass.def(py::init<const BatchedMappedDecoderCudaConfig&,
+  // pyclass.def(nb::init<const BatchedMappedDecoderCudaConfig&,
   //                      const fst::Fst<fst::StdArc>&,
   //                      std::unique_ptr<kaldi::TransitionInformation> &&>());
-  pyclass.def(py::init([](const riva::asrlib::BatchedMappedDecoderCudaConfig& config,
+  pyclass.def("__init__", [](PyClass* decoder,
+                          const riva::asrlib::BatchedMappedDecoderCudaConfig& config,
                           const std::string& wfst_path_on_disk,
                           const std::string& symbol_table_path_on_disk,
                           int num_tokens_including_blank) {
@@ -220,46 +186,25 @@ PybindBatchedMappedDecoderCuda(py::module& m)
     auto word_syms =
         std::unique_ptr<fst::SymbolTable>(fst::SymbolTable::ReadText(symbol_table_path_on_disk));
 
-    auto decoder = new PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
-    return decoder;
-  }));
+    new (decoder) PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
+                          });
+
+  using LogitsArray = nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
+  using LogitsLengthsArray = nb::ndarray<long, nb::shape<nb::any>, nb::c_contig, nb::device::cpu>;
 
   pyclass.def(
               "decode_write_lattice",
-      [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
-         DLManagedTensor& managed_logits_lengths,
-         const std::vector<std::string>& keys,
-         const std::string& output_wspecifier) {
-        const DLTensor& logits = managed_logits.dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
-        if (logits.ndim != 3) {
-          throw std::invalid_argument("Expected a 3D logits tensor");
-        }
-        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a float32 logits tensor");
-        }
-        if (logits.device.device_type != kDLCUDA) {
-          throw std::invalid_argument("Expected logits tensor to be on GPU");
-        }
-        if (logits_lengths.ndim != 1) {
-          throw std::invalid_argument("Expected a 1D logits lengths tensor");
-        }
-        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
-            logits_lengths.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
-        }
-        if (logits_lengths.device.device_type != kDLCPU) {
-          throw std::invalid_argument("Expected lengths tensor to be on CPU");
-        }
-        // logits should be batch x time x logits
-        int64_t batch_size = logits_lengths.shape[0];
+              [](PyClass& cuda_pipeline, LogitsArray& logits,
+                 LogitsLengthsArray& logits_lengths,
+                 const std::vector<std::string>& keys,
+                 const std::string& output_wspecifier) {
+        int64_t batch_size = logits_lengths.shape(0);
 
         kaldi::CompactLatticeWriter clat_writer(output_wspecifier);
         for (int64_t i = 0; i < batch_size; ++i) {
-          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
+          int64_t valid_time_steps = logits_lengths(i);
 
-          // this may not be right... Yes, it seems quite wrong...
-          const float* single_sample_logits_start = address<float>(logits, i, 0);
+          const float* single_sample_logits_start = &logits(i, 0, 0);
           // number of rows is number of frames
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
@@ -271,8 +216,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
               };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start,
-              stride(logits, 1),
-              index<int64_t>(logits_lengths, i),
+              logits.stride(1),
+              valid_time_steps,
               write_results);
         }
         cuda_pipeline.WaitForAllTasks();
@@ -281,49 +226,14 @@ PybindBatchedMappedDecoderCuda(py::module& m)
 
   pyclass.def(
       "decode_mbr",
-      [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
-         DLManagedTensor& managed_logits_lengths)
+      [](PyClass& cuda_pipeline, LogitsArray& logits,
+         LogitsLengthsArray& logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
-        // contiguousness might not mean what I think it means. It may just mean
-        // stride has no padding.
-
-        // I need to set the DLManagedTensor's capsule name to
-        // "used_dltensor" somehow... pybind11 does not expose that
-        // though...
-        const DLTensor& logits = managed_logits.dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
-        if (logits.ndim != 3) {
-          throw std::invalid_argument("Expected a 3D logits tensor");
-        }
-        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a float32 logits tensor");
-        }
-        // TODO: Consider setting device id based on this... Could use RAII like
-        // in K2 for that.
-        if (logits.device.device_type != kDLCUDA) {
-          throw std::invalid_argument("Expected logits tensor to be on GPU");
-        }
-        if (logits_lengths.ndim != 1) {
-          throw std::invalid_argument("Expected a 1D logits lengths tensor");
-        }
-        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
-            logits_lengths.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
-        }
-        if (logits_lengths.device.device_type != kDLCPU) {
-          throw std::invalid_argument("Expected lengths tensor to be on CPU");
-        }
-        // logits should be batch x time x logits
-        int64_t batch_size = logits_lengths.shape[0];
+        int64_t batch_size = logits_lengths.shape(0);
         std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
-          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
-
-          // this may not be right... Yes, it seems quite wrong...
-          const float* single_sample_logits_start = address<float>(logits, i, 0);
-          // number of rows is number of frames
-          // number of cols is number of logits
-          // stride of each row is stride. Always greater than number of cols
+          int64_t valid_time_steps = logits_lengths(i);
+          const float* single_sample_logits_start = &logits(i, 0, 0);
           auto place_results =
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
@@ -338,11 +248,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
               };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start,
-              // single_sample_logits.data_ptr<float>(),
-              stride(logits, 1),
-              // single_sample_logits.stride(1),
-              index<int64_t>(logits_lengths, i),
-              // size(0)
+              logits.stride(1),
+              valid_time_steps,
               place_results);
         }
         cuda_pipeline.WaitForAllTasks();
@@ -350,42 +257,18 @@ PybindBatchedMappedDecoderCuda(py::module& m)
       });
 
   pyclass.def("decode_map",
-              [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
-                 DLManagedTensor& managed_logits_lengths)
+              [](PyClass& cuda_pipeline, LogitsArray& logits,
+                 LogitsLengthsArray& logits_lengths)
               -> std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
               {
-        const DLTensor& logits = managed_logits.dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
-        if (logits.ndim != 3) {
-          throw std::invalid_argument("Expected a 3D logits tensor");
-        }
-        if (logits.dtype.code != kDLFloat || logits.dtype.bits != 32 || logits.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a float32 logits tensor");
-        }
-        // TODO: Consider setting device id based on this... Could use RAII like
-        // in K2 for that.
-        if (logits.device.device_type != kDLCUDA) {
-          throw std::invalid_argument("Expected logits tensor to be on GPU");
-        }
-        if (logits_lengths.ndim != 1) {
-          throw std::invalid_argument("Expected a 1D logits lengths tensor");
-        }
-        if (logits_lengths.dtype.code != kDLInt || logits_lengths.dtype.bits != 64 ||
-            logits_lengths.dtype.lanes != 1) {
-          throw std::invalid_argument("Expected a 64-bit signed integer logits lengths tensor");
-        }
-        if (logits_lengths.device.device_type != kDLCPU) {
-          throw std::invalid_argument("Expected lengths tensor to be on CPU");
-        }
-        // logits should be batch x time x logits
-        int64_t batch_size = logits_lengths.shape[0];
+        int64_t batch_size = logits_lengths.shape(0);
         // batch, nbest result, words with times
         std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
-          int64_t valid_time_steps = index<int64_t>(logits_lengths, i);
+          int64_t valid_time_steps = logits_lengths(i);
 
           // this may not be right... Yes, it seems quite wrong...
-          const float* single_sample_logits_start = address<float>(logits, i, 0);
+          const float* single_sample_logits_start = &logits(i, 0, 0);
           // number of rows is number of frames
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
@@ -414,11 +297,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
           };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start,
-              // single_sample_logits.data_ptr<float>(),
-              stride(logits, 1),
-              // single_sample_logits.stride(1),
-              index<int64_t>(logits_lengths, i),
-              // size(0)
+              logits.stride(1),
+              valid_time_steps,
               place_results);
         }
         cuda_pipeline.WaitForAllTasks();
@@ -426,19 +306,19 @@ PybindBatchedMappedDecoderCuda(py::module& m)
               });
 
   pyclass.def("decode_do_nothing",
-              [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
-                 DLManagedTensor& managed_logits_lengths)
+              [](PyClass& cuda_pipeline, const nb::ndarray<>& managed_logits,
+                 const nb::ndarray<>& managed_logits_lengths)
               {
                 // doesn't work. Still end up running out of GPU memory.
-                managed_logits.deleter();
-                managed_logits_lengths.deleter();
+                // managed_logits.deleter();
+                // managed_logits_lengths.deleter();
                 // see if this causes a memory leak
                 return;
               });
 }
-}  // anonymous namespace
+} // anonymous namespace
 
-PYBIND11_MODULE(python_decoder, m)
+NB_MODULE(python_decoder, m)
 {
   m.doc() = "pybind11 bindings for the CUDA WFST decoder";
 

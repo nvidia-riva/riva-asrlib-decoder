@@ -209,8 +209,14 @@ target_link_libraries(arpa-to-const-arpa riva_asrlib_wfst_decoder)
 #   COMMAND ${CMAKE_SOURCE_DIR}/src/offline-cuda-decode-binary-test.sh --config $<CONFIG> --exe $<TARGET_FILE:offline-cuda-decode-binary>)
 
 if (RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
-  add_subdirectory(third_party/pybind11)
-  add_subdirectory(third_party/dlpack)
-  pybind11_add_module(python_decoder src/riva/asrlib/decoder/python_decoder.cc)
-  target_link_libraries(python_decoder PUBLIC riva_asrlib_wfst_decoder dlpack)
+  # add_subdirectory(third_party/pybind11)
+  # add_subdirectory(third_party/dlpack)
+  find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import nanobind; print(nanobind.cmake_dir())"
+    OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE NB_DIR)
+  list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
+  find_package(nanobind CONFIG REQUIRED)
+  nanobind_add_module(python_decoder src/riva/asrlib/decoder/python_decoder.cc)
+  target_link_libraries(python_decoder PUBLIC riva_asrlib_wfst_decoder)
 endif(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS)
