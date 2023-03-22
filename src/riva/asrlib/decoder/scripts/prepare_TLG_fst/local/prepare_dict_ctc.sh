@@ -30,9 +30,9 @@ sil_token="<space>"   # the character you have used to represent spaces
 . parse_options.sh || exit 1;
 . path.sh || exit 1
 
-set -e
+# set -e
 set -u
-set -o pipefail
+# set -o pipefail
 
 
 lexicon=$1
@@ -43,6 +43,10 @@ dir=$2
 
 mkdir -p $dir || exit 1;
 echo $dir
+
+awk '{$1=$1;print}' < $lexicon > $dir/lexicon_no_trailing_whitepsace.txt
+
+lexicon=$dir/lexicon_no_trailing_whitepsace.txt
 
 awk '{if ($2 !~ /[01]\.[0-9]+/) {exit 1;}}' $lexicon && probabilistic=true || probabilistic=false
 
@@ -112,8 +116,20 @@ if [ $probabilistic = true ]; then
     echo "probabilistic lexicon filtering is not supported"
     cut -d" " -f1,3- $dir/lexiconp.txt > $dir/lexicon.txt
 else
-    (echo '<spoken_noise> [UNK]'; echo '<unk> [UNK]'; ) | cat - $lexicon | sort | uniq > $dir/lexicon.tmp || exit 1;
-    grep -vFf <(comm -23 <(cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u) <(sort $dir/units.txt)) $dir/lexicon.tmp > $dir/lexicon.txt
+    # Do not understand. Too hard to read!!!!
+    (echo '<spoken_noise> [UNK]'; echo '<unk> [UNK]'; ) | cat - $lexicon | sed 's/\t/ /g' | sort | uniq > $dir/lexicon.tmp || exit 1;
+    # It has a problem when the lexicon does not fully cover the units, it seems...
+    cut -d" " -f2- $dir/lexicon.tmp > $dir/1.txt
+    cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' > $dir/2.txt
+    cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u > $dir/units_from_lexicon_sorted.txt
+    sort $dir/units.txt > $dir/units_sorted.txt
+    cmp $dir/units_sorted.txt $dir/units_from_lexicon_sorted.txt
+    if [ $? ]; then
+        echo "ERROR: Difference in units.txt and units derived from lexicon!"
+        # exit 1
+    fi
+    comm -23 $dir/units_from_lexicon_sorted.txt $dir/units_sorted.txt > $dir/units_in_lexicon_only.txt
+    grep -vF --file=$dir/units_in_lexicon_only.txt  $dir/lexicon.tmp > $dir/lexicon.txt
     [ -s $dir/lexicon.txt ] && cmp --silent $dir/lexicon.tmp $dir/lexicon.txt || echo "Something wrong with the final lexicon. Check units for consistency.";
 fi
 

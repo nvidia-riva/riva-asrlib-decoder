@@ -143,11 +143,17 @@ def main():
             vocab_path = os.path.join(args.tokenizer_dir, 'vocab.txt')
             tokenizer = tokenizers.AutoTokenizer(pretrained_model_name='bert-base-cased', vocab_file=vocab_path)
     else:
-        logging.info(f"Loading tokenizer from .nemo model '{args.nemo_model}' ...")
-        model_cfg = ASRModel.restore_from(restore_path=args.nemo_model, return_config=True)
-        classpath = model_cfg.target  # original class path
-        imported_class = model_utils.import_class_by_path(classpath)  # type: ASRModel
-        asr_model = imported_class.restore_from(restore_path=args.nemo_model, map_location="cpu")  # type: ASRModel
+        if args.nemo_model.endswith(".nemo"):
+            logging.info(f"Loading tokenizer from .nemo model '{args.nemo_model}' ...")
+            model_cfg = ASRModel.restore_from(restore_path=args.nemo_model, return_config=True)
+            classpath = model_cfg.target  # original class path
+            imported_class = model_utils.import_class_by_path(classpath)  # type: ASRModel
+            asr_model = imported_class.restore_from(restore_path=args.nemo_model, map_location="cpu")  # type: ASRModel
+        else:
+            model_cfg = ASRModel.from_pretrained(args.nemo_model, return_config=True)
+            classpath = model_cfg.target  # original class path
+            imported_class = model_utils.import_class_by_path(classpath)  # type: ASRModel
+            asr_model = imported_class.from_pretrained(args.nemo_model, map_location="cpu")  # type: ASRModel
         tokenizer = asr_model.tokenizer
 
     inv_vocabulary = ['' for i in range(tokenizer.vocab_size)]
