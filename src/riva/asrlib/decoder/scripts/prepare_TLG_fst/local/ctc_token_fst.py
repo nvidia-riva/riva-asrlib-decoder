@@ -32,6 +32,7 @@ if __name__ == "__main__":
             phone = entry.strip().split()[0]
             if phone == "<eps>" or phone == "<blk>":
                 continue
+            # disambig phones are handled correctly then!
             if phone.startswith("#") and not phone.startswith("##"):
                 disambigs.append(phone)
             else:

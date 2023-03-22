@@ -226,12 +226,12 @@ PybindBatchedMappedDecoderCuda(py::module& m)
 
   pyclass.def(
               "decode_write_lattice",
-      [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
-         const DLManagedTensor* managed_logits_lengths,
+      [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
+         DLManagedTensor& managed_logits_lengths,
          const std::vector<std::string>& keys,
          const std::string& output_wspecifier) {
-        const DLTensor& logits = managed_logits->dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
+        const DLTensor& logits = managed_logits.dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
         if (logits.ndim != 3) {
           throw std::invalid_argument("Expected a 3D logits tensor");
         }
@@ -281,8 +281,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
 
   pyclass.def(
       "decode_mbr",
-      [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
-         const DLManagedTensor* managed_logits_lengths)
+      [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
+         DLManagedTensor& managed_logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
         // contiguousness might not mean what I think it means. It may just mean
         // stride has no padding.
@@ -290,8 +290,8 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         // I need to set the DLManagedTensor's capsule name to
         // "used_dltensor" somehow... pybind11 does not expose that
         // though...
-        const DLTensor& logits = managed_logits->dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
+        const DLTensor& logits = managed_logits.dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
         if (logits.ndim != 3) {
           throw std::invalid_argument("Expected a 3D logits tensor");
         }
@@ -350,12 +350,12 @@ PybindBatchedMappedDecoderCuda(py::module& m)
       });
 
   pyclass.def("decode_map",
-              [](PyClass& cuda_pipeline, const DLManagedTensor* managed_logits,
-                 const DLManagedTensor* managed_logits_lengths)
+              [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
+                 DLManagedTensor& managed_logits_lengths)
               -> std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
               {
-        const DLTensor& logits = managed_logits->dl_tensor;
-        const DLTensor& logits_lengths = managed_logits_lengths->dl_tensor;
+        const DLTensor& logits = managed_logits.dl_tensor;
+        const DLTensor& logits_lengths = managed_logits_lengths.dl_tensor;
         if (logits.ndim != 3) {
           throw std::invalid_argument("Expected a 3D logits tensor");
         }
@@ -423,7 +423,18 @@ PybindBatchedMappedDecoderCuda(py::module& m)
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
-});
+              });
+
+  pyclass.def("decode_do_nothing",
+              [](PyClass& cuda_pipeline, DLManagedTensor& managed_logits,
+                 DLManagedTensor& managed_logits_lengths)
+              {
+                // doesn't work. Still end up running out of GPU memory.
+                managed_logits.deleter();
+                managed_logits_lengths.deleter();
+                // see if this causes a memory leak
+                return;
+              });
 }
 }  // anonymous namespace
 

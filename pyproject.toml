@@ -9,7 +9,8 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
-build = "{cp36-manylinux_x86_64,cp37-manylinux_x86_64,cp38-manylinux_x86_64,cp39-manylinux_x86_64,cp310-manylinux_x86_64,cp311-manylinux_x86_64}"
+#build = "{cp36-manylinux_x86_64,cp37-manylinux_x86_64,cp38-manylinux_x86_64,cp39-manylinux_x86_64,cp310-manylinux_x86_64,cp311-manylinux_x86_64}"
+build = "cp38-manylinux_x86_64"
 # Need to set the pythonLocation environment variable manually becase CMake picks up /usr/bin/python3.6 no matter what otherwise
 # https://cmake.org/cmake/help/latest/prop_tgt/CUDA_ARCHITECTURES.html#prop_tgt:CUDA_ARCHITECTURES
 environment = 'RIVA_ASRLIB_DECODER_CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" CUDAARCHS="52-real;60-real;61-real;70-real;75-real;80-real;86" pythonLocation="$(readlink -f $(which python))/.."'
@@ -17,7 +18,7 @@ environment = 'RIVA_ASRLIB_DECODER_CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" CUDAA
 # it uses setup.py, not pyproject.toml
 before-test = "pip install Cython"
 test-command = "pytest {project}/src/riva/asrlib/decoder/test_decoder.py"
-test-requires = ["pytest", "kaldi-io", "more-itertools", "nemo_toolkit[asr]", "torchaudio"]
+test-requires = ["pytest", "kaldi-io", "more-itertools", "nemo_toolkit[asr]", "torchaudio", "pynini"]
 # 3.6 fails because onnx doesn't provide python3.6 wheels: https://pypi.org/project/onnx/#files
 # 3.11 fails becasue of numba: Cannot install on Python version 3.11.1; only versions >=3.7,<3.11 are supported
 test-skip = "{cp36-manylinux_x86_64,cp311-manylinux_x86_64}"
