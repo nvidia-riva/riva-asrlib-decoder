@@ -47,6 +47,8 @@ set -e
 set -u
 set -o pipefail
 
+set -x
+
 lexicon_path=$1
 lm_path=$2
 dest_dir=$3
@@ -111,9 +113,14 @@ fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     log "Building a \"${suffix}\" TLG.fst ..."
+    # fstdeterminizestar --use-log=true ${graphdir}/L_disambig.fst | fstminimizeencoded | fstarcsort --sort_type=olabel > ${graphdir}/L_disambig_detmin.fst
     fsttablecompose ${graphdir}/L_disambig.fst ${graphdir}/G.fst | fstdeterminizestar --use-log=true | \
         fstminimizeencoded | fstarcsort --sort_type=ilabel > ${graphdir}/LG.fst
-    fsttablecompose ${graphdir}/T${t_suffix}.fst ${graphdir}/LG.fst | $post_proc_command > ${graphdir}/TLG.fst
+    # TODO: Why is this not determinized?
+    # Also, we are not removing the #0 symbol... Or any other disambig symbol?
+    # fstrmsymbols $dir/disambig_tid.int | \
+    fsttablecompose ${graphdir}/T${t_suffix}.fst ${graphdir}/LG.fst | \
+        $post_proc_command > ${graphdir}/TLG.fst
 fi
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then

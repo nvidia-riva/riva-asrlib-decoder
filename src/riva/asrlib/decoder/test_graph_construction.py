@@ -19,6 +19,7 @@ import os
 import glob
 import gzip
 from contextlib import ExitStack
+import itertools
 import json
 import multiprocessing
 import os
@@ -44,10 +45,21 @@ import torchaudio
 import torchmetrics
 from tqdm import tqdm
 
+# importing this causes pytest never to finish "collecting". No idea why.
+# import pywrapfst
+
 import riva.asrlib.decoder
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
 from torch.utils.data import Dataset, Subset
+
+import logging
+logging.getLogger("nemo").setLevel(logging.INFO)
+
+
+decoder_g = None
+
+memory_cpu_tensors = 0
 
 # torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 # torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
@@ -73,10 +85,6 @@ class TestGraphConstruction:
     def setup(self):
         self.temp_dir = os.path.abspath("tmp_graph_construction")
         os.makedirs(self.temp_dir, exist_ok=True)
-        # self.wfst_dir = os.path.join(self.temp_dir, "wfst")
-        # os.makedirs(self.wfst_dir, exist_ok=True)
-        # self.am_dir = os.path.join(self.temp_dir, "am")
-        # os.makedirs(self.am_dir, exist_ok=True)
 
         lm_zip_file = os.path.join(self.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
@@ -124,40 +132,25 @@ class TestGraphConstruction:
                 words_fh.write(word)
                 words_fh.write("\n")
 
-        self.nemo_model_path = os.path.join(self.temp_dir, "stt_en_conformer_ctc_small.nemo")
-        config_yaml = os.path.join(self.temp_dir, "model_config.yaml")
+        librispeech_test_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True)
+        librispeech_test_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)
+        librispeech_dev_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "dev-clean", download=True)
+        librispeech_dev_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "dev-other", download=True)
 
-        yaml = YAML(typ='safe')
-        with tarfile.open(self.nemo_model_path, "r:gz") as tar_fh:
-            with tar_fh.extractfile("./model_config.yaml") as fh:
-                data = yaml.load(fh)
-        self.units_txt = os.path.join(self.temp_dir, "units.txt")
-        with open(self.units_txt, "w") as fh:
-            for unit in data["decoder"]["vocabulary"]:
-                fh.write(f"{unit}\n")
-
-        self.num_tokens_including_blank = len(data["decoder"]["vocabulary"]) + 1
-        assert self.num_tokens_including_blank == 1025
-
-        librispeech_test_clean = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True))
-        librispeech_test_other = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True))
-
-        self.original_dataset_map = {"test_clean": torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True),
-                                     "test_other": torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)}
+        self.original_dataset_map = {"test-clean": librispeech_test_clean,
+                                     "test-other": librispeech_test_other,
+                                     "dev-clean": librispeech_dev_clean,
+                                     "dev-other": librispeech_dev_other,}
         self.dataset_map = {}
 
-        for key, dataset in (("test_clean", librispeech_test_clean),
-                             ("test_other", librispeech_test_other)):
+        for key, dataset in self.original_dataset_map.items():
+            dataset = CacheDataset(dataset)
             lengths = []
             for i in range(len(dataset)):
                 waveform, *_ = dataset[i]
                 lengths.append(waveform.size(1))
             sorted_indices = list(np.argsort(lengths))
             self.dataset_map[key] = Subset(dataset, sorted_indices)
-        # self.dataset_map = {
-        #     "test_clean": librispeech_test_clean,
-        #     "test_other": librispeech_test_other,
-        # }
 
 
     def test_eesen_ctc_topo(self):
@@ -169,30 +162,245 @@ class TestGraphConstruction:
     # on the Librispeech training text as well.
     # 
     # Got 0.033627510651247715 on librispeech test clean with the flashlight decoder
-    @pytest.mark.parametrize("dataset, expected_wer, half_precision",
-                             [("test_clean", 0.03509205721241631, False),
-                              ("test_clean", 0.035263237979306146, True),
-                              ("test_other", 0.07034369447681639, False),
-                              ("test_other", 0.0706302657470913, True)
+    # stt_en_conformer_ctc_medium, stt_en_conformer_ctc_large
+    @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
+                             [
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03509205721241631, False),
+                                 # ("stt_en_conformer_ctc_small", "test-clean", 0.035263237979306146, True),
+                                 # ("stt_en_conformer_ctc_small", "test-other", 0.07034369447681639, False),
+                                 # ("stt_en_conformer_ctc_small", "test-other", 0.07118430353628948, True),
+                                 # ("stt_en_conformer_ctc_small", "dev-clean", 1.03509205721241631, False),
+                                 # ("stt_en_conformer_ctc_small", "dev-clean", 1.035263237979306146, True),
+                                 # ("stt_en_conformer_ctc_small", "dev-other", 1.07034369447681639, False),
+                                 # ("stt_en_conformer_ctc_small", "dev-other", 1.07118430353628948, True),
+                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.028549147900182592, False),
+                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.0286442483262325, True),
+                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.056282597481993775, False),
+                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.056167968973883806, True),
+                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 1.028549147900182592, False),
+                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 1.0286442483262325, True),
+                                 # ("stt_en_conformer_ctc_medium", "dev-other", 1.056282597481993775, False),
+                                 # ("stt_en_conformer_ctc_medium", "dev-other", 1.056167968973883806, True),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
+                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
+                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
                              ])
-    def test_vanilla_ctc_topo(self, dataset, expected_wer, half_precision):
+    def test_vanilla_ctc_topo(self, nemo_model_name, dataset, expected_wer, half_precision):
+        # import gc
+        # gc.collect()
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem_gib = process.memory_info().rss / 1024 / 1024 /1024
+        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} mem_gib={mem_gib} mem_cpu_tensors={memory_cpu_tensors / 1024 / 1024 / 1024}")
+        work_dir = os.path.join(self.temp_dir, f"ctc_detmin_l_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        for acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest in itertools.product(
+                [1.0 / 0.55], # 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0): #0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                [1024],
+                [0.0,],  # 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],  
+                [-0.5],  # -0.1, -0.2, -0.3, -0.4, 
+                [0.8], # [-0.15, -0.30, -0.45, -0.60, -0.75, -0.90, -1.05]
+                [1]):
+
+            wer, _, _ = self.run_decoder(asr_model, work_dir, self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest)
+            print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
+            print(f"GALVEZ:model={nemo_model_name} dataset={dataset} wer={wer}")
+            # assert wer <= expected_wer
+        
+        # self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 2)
+
+    @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
+                             [
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03509205721241631, False),
+                                 # ("stt_en_conformer_ctc_small", "test-clean", 0.035263237979306146, True),
+                                 # ("stt_en_conformer_ctc_small", "test-other", 0.07034369447681639, False),
+                                 # ("stt_en_conformer_ctc_small", "test-other", 0.07118430353628948, True),
+                                 # ("stt_en_conformer_ctc_small", "dev-clean", 1.03509205721241631, False),
+                                 # ("stt_en_conformer_ctc_small", "dev-clean", 1.035263237979306146, True),
+                                 # ("stt_en_conformer_ctc_small", "dev-other", 1.07034369447681639, False),
+                                 # ("stt_en_conformer_ctc_small", "dev-other", 1.07118430353628948, True),
+                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.028549147900182592, False),
+                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.0286442483262325, True),
+                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.056282597481993775, False),
+                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.056167968973883806, True),
+                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 1.028549147900182592, False),
+                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 1.0286442483262325, True),
+                                 # ("stt_en_conformer_ctc_medium", "dev-other", 1.056282597481993775, False),
+                                 # ("stt_en_conformer_ctc_medium", "dev-other", 1.056167968973883806, True),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
+                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
+                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
+                             ])
+    def test_vanilla_repeat(self, nemo_model_name, dataset, expected_wer, half_precision):
+        import psutil
+        process = psutil.Process(os.getpid())
+        mem_gib = process.memory_info().rss / 1024 / 1024 /1024
+        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} mem_gib={mem_gib}")
+        work_dir = os.path.join(self.temp_dir, f"ctc_detmin_l_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+        # num_tokens_including_blank = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+
+
+        acoustic_scale = 1.0 / 0.55
+        blank_ilabel = 1024
+        blank_penalty = 0.0
+        length_penalty = -0.5
+        lm_scale = 0.8
+        nbest = 1
+        
+
+        config = self.create_decoder_config()
+        config.online_opts.decoder_opts.blank_penalty = blank_penalty
+        config.online_opts.decoder_opts.blank_ilabel = blank_ilabel
+        config.online_opts.decoder_opts.length_penalty = length_penalty
+        config.online_opts.lattice_postprocessor_opts.lm_scale = lm_scale
+        config.online_opts.lattice_postprocessor_opts.nbest = nbest
+        decoder = BatchedMappedDecoderCuda(
+            config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank
+        )
+
+        data_loader = torch.utils.data.DataLoader(
+            self.dataset_map[dataset],
+            batch_size=config.online_opts.num_channels,
+            num_workers=0,
+            collate_fn=collate_fn,
+            pin_memory=True)
+
+        references = []
+        results = []
+        all_utterance_ids = []
+        all_greedy_predictions = []
+
+        total_audio_length_samples = 0
+
+        # wer = torchmetrics.WordErrorRate()
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+            start_time = time.time_ns()
+            # batch = next(iter(data_loader))
+            # for batch in data_loader:
+            #     break
+            while True:
+                import gc; gc.collect()
+                mem_gib = process.memory_info().rss / 1024 / 1024 /1024
+                print("Memory in Gigabytes:", mem_gib)
+                import sys; sys.stdout.flush()
+                for batch in data_loader:
+                    
+                    input_signal, input_signal_length, target, utterance_ids = batch
+                    all_utterance_ids.extend(utterance_ids)
+                    total_audio_length_samples += torch.sum(input_signal_length)
+                    references.extend(target)
+                    input_signal = input_signal.cuda()
+                    input_signal_length = input_signal_length.cuda()
+                    log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                    log_probs *= acoustic_scale
+
+                    cpu_lengths = lengths.to(torch.int64).to('cpu')
+
+                    decoder.decode_do_nothing(log_probs.to(torch.float32), cpu_lengths)
+            end_time = time.time_ns()
+        run_time_seconds = (end_time - start_time) / 1_000_000_000
+        input_time_seconds = total_audio_length_samples / 16_000
+        # print("RTFx:", input_time_seconds / run_time_seconds)
+        # print("run time:", run_time_seconds)
+        predictions = []
+        assert len(all_utterance_ids) == len(results)
+        for utt_id, result in zip(all_utterance_ids, results):
+            # Have nbest=1
+            # Ugh, need to be able to output a dictionary mapping
+            for nth_result in result:
+                score = nth_result[0]
+                words_and_times = nth_result[1]
+                predictions.append((utt_id, " ".join(piece[0] for piece in words_and_times if piece[0] != "<eps>")))
+        references = [(utt_id, s.lower()) for utt_id, s in zip(all_utterance_ids, references)]
+        my_wer = wer([ref for utt_id, ref in references], [pred for utt_id, pred in predictions])
+        print("beam search WER:", my_wer)
+
+    @pytest.mark.parametrize("dataset_name,",
+                             ["test-clean", "test-other"])
+    def test_flashlight_alone(self, dataset_name):
+        _ = self.run_decoder_flashlight(dataset_name)
+
+    @pytest.mark.parametrize("dataset_name, nbest",
+                             [("test-clean", 10 ),
+                              ("test-clean", 1 ),
+                              ("test-other", 10 ),
+                              ("test-other", 1 ),
+                             ])
+    def test_flashlight_vs_wfst(self, dataset_name, nbest):
         work_dir = os.path.join(self.temp_dir, "ctc")
-        # self.create_TLG("ctc", work_dir)
-        wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision)
-        assert wer <= expected_wer
+        flashlight_predictions, references, durations, file_paths = self.run_decoder_flashlight(dataset_name)
+        # No caching or sorting by sequence length allowed here
+        dataset = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, dataset_name, download=True))
+        _, wfst_predictions, wfst_references = self.run_decoder(work_dir, dataset, False, 1.0 / 0.55, 0.0, 1024, -0.5, 0.8, nbest)
 
-        # self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 10)
-        print("GALVEZ:wer=", wer)
+        with open(f"wfst_{dataset_name}_nbest_{nbest}.txt", "w") as fh:
+            for utt_id, wfst_prediction in wfst_predictions:
+                fh.write(f"{utt_id} {wfst_prediction}\n")
 
-    def test_flashlight(self):
-        self.run_decoder_flashlight()
+        with open(f"ref_{dataset_name}.txt", "w") as fh:
+            for utt_id, reference in wfst_references:
+                fh.write(f"{utt_id} {reference}\n")
+
+        flashlight_predictions, references, durations, file_paths = self.run_decoder_flashlight(dataset_name)
+            
+        # with open(f"wfst_vs_ref_{dataset_name}.jsonl", "w") as fh:
+        #     for (_, reference), (_, wfst_prediction), duration, file_path in \
+        #         zip(wfst_references, wfst_predictions, durations, file_paths):
+        #         json.dump({"audio_filepath": file_path, "duration": duration,
+        #                    "text": reference, "pred_text": wfst_prediction}, fh)
+        #         fh.write("\n")
+
+        # assert len(flashlight_predictions) == len(wfst_predictions)
+        # with open(f"flashlight_vs_wfst_{dataset_name}.jsonl", "w") as fh:
+        #     for (_, flashlight_prediction), (_, wfst_prediction), duration, file_path in \
+        #         zip(flashlight_predictions, wfst_predictions, durations, file_paths):
+        #         json.dump({"audio_filepath": file_path, "duration": duration,
+        #                    "text": flashlight_prediction, "pred_text": wfst_prediction}, fh)
+        #         fh.write("\n")
+
+        # with open("references.jsonl", "w") as fh:
+        #     json.dump(references, fh)
+        # with open("flashlight_predictions.jsonl", "w") as fh:
+        #     json.dump(flashlight_predictions, fh)
+        # work_dir = os.path.join(self.temp_dir, "ctc")
+        # _, wfst_predictions, wfst_references = self.run_decoder(work_dir, self.dataset_map["test-clean"], False, 1.0 / 0.55, 0.0, 1024, -0.5, 0.8)
+        # with open("wfst_predictions.jsonl", "w") as fh:
+        #     json.dump(wfst_predictions, fh)
 
     def test_delete_decoder(self):
         """Ensure that allocating a decoder, decoding with it, deleting it,
         and then reallocating a new one, and deocding with that one,
         does not crash.
         """
-        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+        asr_model = nemo_asr.models.ASRModel.from_pretrained("stt_en_conformer_ctc_small", map_location=torch.device("cuda"))
 
         asr_model.preprocessor.featurizer.dither = 0.0
         asr_model.preprocessor.featurizer.pad_to = 0
@@ -207,7 +415,7 @@ class TestGraphConstruction:
         decoder2_config = self.create_decoder_config()
 
         data_loader = torch.utils.data.DataLoader(
-            self.dataset_map["test_clean"],
+            self.dataset_map["test-clean"],
             batch_size=decoder1_config.online_opts.max_batch_size,
             collate_fn=collate_fn,
             pin_memory=True)
@@ -248,7 +456,17 @@ class TestGraphConstruction:
     def test_identity_ctc_topo(self):
         self.create_TLG("identity", os.path.join(self.temp_dir, "identity"))
 
-    def create_TLG(self, topo, work_dir):
+    def create_TLG(self, topo, work_dir, nemo_model_name):
+        # If TLG was already created, skip this process.
+        if len(glob.glob(os.path.join(work_dir, "graph/*/TLG.fst"))) != 0:
+            return
+        os.makedirs(work_dir, exist_ok=True)
+        asr_model_config = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, return_config=True)
+        units_txt = os.path.join(work_dir, "units.txt")
+        with open(os.path.join(work_dir, "units.txt"), "w") as fh:
+            for unit in asr_model_config["decoder"]["vocabulary"]:
+                fh.write(f"{unit}\n")
+
         (path,) = riva.asrlib.decoder.__path__
         prep_subw_lexicon = os.path.join(path, "scripts/prepare_TLG_fst/prep_subw_lexicon.sh")
         lexicon_path = os.path.join(work_dir, "lexicon.txt")
@@ -258,7 +476,7 @@ class TestGraphConstruction:
                 "--target",
                 "words",
                 "--model_path",
-                self.nemo_model_path,
+                nemo_model_name,
                 "--vocab",
                 self.words_path,
                 lexicon_path,
@@ -274,7 +492,7 @@ class TestGraphConstruction:
                 "--lm_lowercase",
                 "true",
                 "--units",
-                self.units_txt,
+                units_txt,
                 "--topo",
                 topo,
                 lexicon_path,
@@ -287,38 +505,58 @@ class TestGraphConstruction:
     def create_decoder_config():
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
-        config.online_opts.decoder_opts.default_beam = 17.0
+        config.online_opts.decoder_opts.default_beam = 50.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
-        config.online_opts.decoder_opts.max_active = 10_000
+        config.online_opts.decoder_opts.max_active = 1_000
         # From when I was testing some penalties discussed in wenet. These can be added back later.
         # config.online_opts.decoder_opts.blank_penalty = 0.01
         # config.online_opts.decoder_opts.blank_ilabel = 1024
         # config.online_opts.decoder_opts.length_penalty = -4.5
         config.online_opts.determinize_lattice = True
-        config.online_opts.max_batch_size = 160
+        config.online_opts.max_batch_size = 80
         config.online_opts.num_channels = config.online_opts.max_batch_size * 2
         config.online_opts.frame_shift_seconds = 0.04
         config.online_opts.lattice_postprocessor_opts.acoustic_scale = 1.0
         # 0.035244217894096166 WER for 5.0 lm_scale
         # 0.0358338405356056 WER for 7.0 lm_scale
         # 0.035015976871576385 WER for 5.5 lm_scale
-        config.online_opts.lattice_postprocessor_opts.lm_scale = .55
+        config.online_opts.lattice_postprocessor_opts.lm_scale = 1.0  # 0.55
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
-        config.online_opts.num_decoder_copy_threads = 2
+        config.online_opts.lattice_postprocessor_opts.nbest = 1
+        config.online_opts.num_decoder_copy_threads = 1
         config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
 
         return config
 
-    def run_decoder(self, graph_path: str, dataset: torch.utils.data.IterableDataset, half_precision: bool):
-        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+    def test_differences(self):
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        wer = self.run_decoder(work_dir, self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale)
+
+        self.run_decoder_flashlight("test-clean")
+
+    def run_decoder(self, asr_model, graph_path: str, dataset: torch.utils.data.IterableDataset, half_precision: bool, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest):
+        # asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+        # num_tokens_including_blank = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
 
         config = self.create_decoder_config()
-        decoder = BatchedMappedDecoderCuda(
+        config.online_opts.decoder_opts.blank_penalty = blank_penalty
+        config.online_opts.decoder_opts.blank_ilabel = blank_ilabel
+        config.online_opts.decoder_opts.length_penalty = length_penalty
+        config.online_opts.lattice_postprocessor_opts.lm_scale = lm_scale
+        config.online_opts.lattice_postprocessor_opts.nbest = nbest
+        global decoder_g
+        if decoder_g is None:
+            decoder = BatchedMappedDecoderCuda(
             config,
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
             os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-            self.num_tokens_including_blank
-        )
+            num_tokens_including_blank
+            )
+            decoder_g = decoder
+        else:
+            decoder = decoder_g
 
         data_loader = torch.utils.data.DataLoader(
             dataset,
@@ -329,6 +567,7 @@ class TestGraphConstruction:
 
         references = []
         results = []
+        all_utterance_ids = []
         all_greedy_predictions = []
 
         total_audio_length_samples = 0
@@ -347,7 +586,8 @@ class TestGraphConstruction:
             start_time = time.time_ns()
             for batch in data_loader:
                 torch.cuda.nvtx.range_push("batch")
-                input_signal, input_signal_length, target = batch
+                input_signal, input_signal_length, target, utterance_ids = batch
+                all_utterance_ids.extend(utterance_ids)
                 total_audio_length_samples += torch.sum(input_signal_length)
                 references.extend(target)
                 torch.cuda.nvtx.range_push("H2D")
@@ -356,6 +596,7 @@ class TestGraphConstruction:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("forward")
                 log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                log_probs *= acoustic_scale
                 torch.cuda.nvtx.range_pop()
                 # from IPython import embed; embed()
                 # greedy_predictions, _ = asr_model.decoding.ctc_decoder_predictions_tensor(log_probs, decoder_lengths=lengths, return_hypotheses=False)
@@ -363,26 +604,44 @@ class TestGraphConstruction:
 
                 torch.cuda.nvtx.range_push("D2H lengths")
                 cpu_lengths = lengths.to(torch.int64).to('cpu')
+                global memory_cpu_tensors
+                memory_cpu_tensors += cpu_lengths.element_size() * cpu_lengths.nelement()
+
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("beam search decoder")
+                # batch_results = decoder.decode_map(log_probs.to(torch.float32), cpu_lengths)
+                # Would ideally like to pass it just as DLTensor instead of 
+                # results.extend(decoder.decode_map(log_probs.to(torch.float32), cpu_lengths))
                 results.extend(decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths))
+                # print("GALVEZ:", results[-1])
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()
             end_time = time.time_ns()
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
-        # print("RTFx:", input_time_seconds / run_time_seconds)
+        print("RTFx:", input_time_seconds / run_time_seconds)
         # print("run time:", run_time_seconds)
         predictions = []
         for result in results:
             predictions.append(" ".join(piece[0] for piece in result))
         references = [s.lower() for s in references]
         my_wer = wer(references, predictions)
+        # assert len(all_utterance_ids) == len(results)
+        # for utt_id, result in zip(all_utterance_ids, results):
+        #     # Have nbest=1
+        #     # Ugh, need to be able to output a dictionary mapping
+        #     for nth_result in result:
+        #         score = nth_result[0]
+        #         words_and_times = nth_result[1]
+        #         predictions.append((utt_id, " ".join(piece[0] for piece in words_and_times if piece[0] != "<eps>")))
+        # references = [(utt_id, s.lower()) for utt_id, s in zip(all_utterance_ids, references)]
+        my_wer = wer(references, predictions)
         print("beam search WER:", my_wer)
         # print("greedy WER:", wer(references, all_greedy_predictions))
-        return my_wer[0]
+        return my_wer[0], predictions, references
 
-    def run_decoder_flashlight(self):
+    # 336.2256739139557 seconds
+    def run_decoder_flashlight(self, dataset_string):
         asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
 
         # subprocess.check_call(shlex.split(f"python /home/dgalvez/scratch/code/asr/riva-asrlib-decoder/NeMo/scripts/asr_language_modeling/ngram_lm/create_lexicon_from_arpa.py --arpa {self.lm_path} --model {self.nemo_model_path} --lower --dst {os.path.join(self.temp_dir, 'flashlight_lexicon.txt')}"))
@@ -404,6 +663,7 @@ class TestGraphConstruction:
         decoding_cfg.beam.kenlm_path = os.path.join(self.temp_dir, 'lm.bin')
         decoding_cfg.beam.flashlight_cfg.lexicon_path=os.path.join(self.temp_dir, 'flashlight_lexicon.txt/3-gram.pruned.3e-7.lexicon')
         decoding_cfg.beam.beam_size = 32
+        # Why set both of these small? It's a bit strange, isn't it?
         decoding_cfg.beam.beam_alpha = 0.2
         decoding_cfg.beam.beam_beta = 0.2
         decoding_cfg.beam.flashlight_cfg.beam_size_token = 32
@@ -412,18 +672,27 @@ class TestGraphConstruction:
         asr_model.change_decoding_strategy(decoding_cfg)
 
         file_paths = []
+        durations = []
         references = []
-        for i in range(len(self.original_dataset_map["test_clean"])):
-            file_path, _, transcript, *_ = self.original_dataset_map["test_clean"].get_metadata(i)
+        for i in range(len(self.original_dataset_map[dataset_string])):
+            file_path, _, transcript, *_ = self.original_dataset_map[dataset_string].get_metadata(i)
+            waveform, sample_rate, *_ = self.original_dataset_map[dataset_string][i]
             file_paths.append(os.path.join(self.temp_dir, "LibriSpeech", file_path))
+            durations.append(waveform.size(1) / sample_rate)
             references.append(transcript.lower())
+
+        # Need to permute these arrays based on length as well...
             
         # files = glob.glob(os.path.join(self.temp_dir, "LibriSpeech/test-clean/*/*/*.flac"))
-        predictions = asr_model.transcribe(paths2audio_files=file_paths, batch_size=16, return_hypotheses=False, logprobs=False)
+        start_time = time.time()
+        predictions = asr_model.transcribe(paths2audio_files=file_paths, batch_size=160, return_hypotheses=False, logprobs=False)
+        end_time = time.time()
+        print("GALVEZ:difference=", end_time - start_time)
         #print(predictions[:2])
         #print(references[:2])
         my_wer = wer(references, predictions)
-        print("GALVEZ:wer=", my_wer)
+        print(f"GALVEZ: {dataset_string} flashlight wer=", my_wer)
+        return predictions, references, durations, file_paths
 
     def run_decoder_throughput(self, graph_path: str, dataset: torch.utils.data.IterableDataset,
                                half_precision: bool, warmup_iters: int, benchmark_iters: int):
@@ -505,14 +774,16 @@ def collate_fn(batch):
     tensors = []
     targets = []
     lengths = []
+    utterance_ids = []
 
     # Gather in lists, and encode labels as indices
-    for waveform, _, label, *_ in batch:
+    for waveform, _, label, speaker_id, chapter_id, utterance_id in batch:
         waveform = waveform.squeeze()
         tensors += [waveform]
         # targets += [torch.zeros(1)]
         targets.append(label)
         lengths.append(waveform.size(0))
+        utterance_ids.append(f"{speaker_id}-{chapter_id}-{utterance_id}")
         # targets += [label_to_index(label)]
 
     # Group the list of tensors into a batched tensor
@@ -520,7 +791,7 @@ def collate_fn(batch):
     lengths = torch.tensor(lengths, dtype=torch.long)
     # targets = torch.stack(targets)
 
-    return tensors, lengths, targets
+    return tensors, lengths, targets, utterance_ids
 
 def trace_back_stats(r, h, d):
     i = len(r)
@@ -547,6 +818,12 @@ def trace_back_stats(r, h, d):
             i = i - 1
             j = j
     return insertions, substitutions, deletions
+
+# It does contain tonnay
+# def test_TLG_containts_tonnay(self):
+#     work_dir = os.path.join(self.temp_dir, "ctc")
+#     tlg = pywrapfst.Fst.read(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"))
+#     tlg.reverse()
 
 def wer(references, hypotheses):
     total_wer = 0
