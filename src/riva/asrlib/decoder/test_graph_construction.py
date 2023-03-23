@@ -952,13 +952,6 @@ def trace_back_stats(r, h, d):
     return insertions, substitutions, deletions
 
 
-# It does contain tonnay
-# def test_TLG_containts_tonnay(self):
-#     work_dir = os.path.join(self.temp_dir, "ctc")
-#     tlg = pywrapfst.Fst.read(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"))
-#     tlg.reverse()
-
-
 def wer(references, hypotheses):
     total_wer = 0
     total_insertions = 0
