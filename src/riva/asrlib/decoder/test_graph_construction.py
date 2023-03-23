@@ -160,34 +160,25 @@ class TestGraphConstruction:
     def test_eesen_ctc_topo(self):
         self.create_TLG("ctc_eesen", os.path.join(self.temp_dir, "ctc_eesen"))
 
-    # TODO: Debug why these WERs are a bit higher than the ones reported here for "N-gram LM"
-    # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_conformer_ctc_small
-    # The reason is probably that the language model is not the same. The NeMo LM is trained
-    # on the Librispeech training text as well.
-    # 
-    # Got 0.033627510651247715 on librispeech test clean with the flashlight decoder
-    # stt_en_conformer_ctc_medium, stt_en_conformer_ctc_large
 
-    # We are running out of memory because pytest creates a new object
-    # for every single test case... Ugh.
     @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
                              [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.035034996956786364, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.034996956786366405, True),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07032458972546472, False),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07099325602277286, True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03343627072534098, False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03327083563104297, True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06948260971971422, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06930595901703698, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.028530127814972613, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.0286442483262325, True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.055938711957663874, False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.056129759471180485, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.025954928127642368, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.026175508253373038, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05340739577608542, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.053564418622909636, True),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
+                                 ("stt_en_conformer_ctc_small", "test-other", 0.07055384674168466, False),
+                                 ("stt_en_conformer_ctc_small", "test-other", 0.07116519878493781, True),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.034355354582552115, True),
+                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06969851613409751, False),
+                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06987516683677475, True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05708499703876354, False),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05737156830903846, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.027811477519208854, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.0547224621182382, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05462432283897307, True),
                                  # Something is going wrong for the large models. Graph construction probably went wrong.
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
@@ -198,7 +189,7 @@ class TestGraphConstruction:
                                  # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
                                  # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
                              ])
-    def test_vanilla_ctc_topo(self, nemo_model_name, dataset, expected_wer, half_precision):
+    def test_vanilla_ctc_topo_wer(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc", work_dir, nemo_model_name)
@@ -209,24 +200,63 @@ class TestGraphConstruction:
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + 0.0001
-        # self.run_decoder_throughput(work_dir, self.dataset_map[dataset], half_precision, 2, 2)
+
+    @pytest.mark.parametrize("nemo_model_name, dataset, half_precision",
+                             [
+                                 ("stt_en_conformer_ctc_small", "test-clean", False),
+                                 ("stt_en_conformer_ctc_small", "test-clean", True),
+                                 ("stt_en_conformer_ctc_small", "test-other", False),
+                                 ("stt_en_conformer_ctc_small", "test-other", True),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", False),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", True),
+                                 ("stt_en_conformer_ctc_small", "dev-other", False),
+                                 ("stt_en_conformer_ctc_small", "dev-other", True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", True),
+                                 ("stt_en_conformer_ctc_medium", "test-other", False),
+                                 ("stt_en_conformer_ctc_medium", "test-other", True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", True),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", False),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", True),
+                                 # Something is going wrong for the large models. Graph construction probably went wrong.
+                                 # ("stt_en_conformer_ctc_large", "test-clean", False),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", True),
+                                 # ("stt_en_conformer_ctc_large", "test-other", False),
+                                 # ("stt_en_conformer_ctc_large", "test-other", True),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", False),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", True),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", False),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", True),
+                             ])
+    def test_vanilla_ctc_topo_throughput(self, nemo_model_name, dataset, half_precision):
+        work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
+        warmup_iters = 2
+        benchmark_iters = 2
+        print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
+        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision}")
+        self.run_decoder_throughput(asr_model, os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest, warmup_iters, benchmark_iters)
 
     @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
                              [
                                  ("stt_en_conformer_ctc_small", "test-clean", 0.03164942178940962, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03161138161898965, True),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03174452221545952, True),
                                  ("stt_en_conformer_ctc_small", "test-other", 0.06761171503352884, False),
                                  ("stt_en_conformer_ctc_small", "test-other", 0.0683185908335403, True),
                                  ("stt_en_conformer_ctc_small", "dev-clean", 0.029631263556486893, False),
                                  ("stt_en_conformer_ctc_small", "dev-clean", 0.02968640858791956, True),
                                  ("stt_en_conformer_ctc_small", "dev-other", 0.06661694276517233, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06649917563005417, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.025068472306755935, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.025182592818015825, True),
+                                 ("stt_en_conformer_ctc_small", "dev-other", 0.0668132213237026, True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.026361838101034693, False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02655203895313451, True),
                                  ("stt_en_conformer_ctc_medium", "test-other", 0.052996580249508055, False),
                                  ("stt_en_conformer_ctc_medium", "test-other", 0.05324494201707965, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.022168302635932502, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.022370501084518952, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.02249917282452851, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.022682989595970735, True),
                                  ("stt_en_conformer_ctc_medium", "dev-other", 0.05034545026301327, False),
                                  ("stt_en_conformer_ctc_medium", "dev-other", 0.05032582240716024, True),
                                  # Something is going wrong for the large models. Graph construction probably went wrong.
@@ -239,7 +269,7 @@ class TestGraphConstruction:
                                  # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
                                  # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
                              ])
-    def test_compact_ctc_topo(self, nemo_model_name, dataset, expected_wer, half_precision):
+    def test_compact_ctc_topo_wer(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_compact_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc_compact", work_dir, nemo_model_name)
@@ -251,24 +281,64 @@ class TestGraphConstruction:
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + 0.0001
 
+    @pytest.mark.parametrize("nemo_model_name, dataset, half_precision",
+                             [
+                                 ("stt_en_conformer_ctc_small", "test-clean", False),
+                                 ("stt_en_conformer_ctc_small", "test-clean", True),
+                                 ("stt_en_conformer_ctc_small", "test-other", False),
+                                 ("stt_en_conformer_ctc_small", "test-other", True),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", False),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", True),
+                                 ("stt_en_conformer_ctc_small", "dev-other", False),
+                                 ("stt_en_conformer_ctc_small", "dev-other", True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", True),
+                                 ("stt_en_conformer_ctc_medium", "test-other", False),
+                                 ("stt_en_conformer_ctc_medium", "test-other", True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", True),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", False),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", True),
+                                 # Something is going wrong for the large models. Graph construction probably went wrong.
+                                 # ("stt_en_conformer_ctc_large", "test-clean", False),
+                                 # ("stt_en_conformer_ctc_large", "test-clean", True),
+                                 # ("stt_en_conformer_ctc_large", "test-other", False),
+                                 # ("stt_en_conformer_ctc_large", "test-other", True),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", False),
+                                 # ("stt_en_conformer_ctc_large", "dev-clean", True),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", False),
+                                 # ("stt_en_conformer_ctc_large", "dev-other", True),
+                             ])
+    def test_compact_ctc_topo_throughput(self, nemo_model_name, dataset, half_precision):
+        work_dir = os.path.join(self.temp_dir, f"ctc_compact_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc_compact", work_dir, nemo_model_name)
+
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
+        warmup_iters = 2
+        benchmark_iters = 2
+        print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
+        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} compact half_precision={half_precision}")
+        self.run_decoder_throughput(asr_model, os.path.join(work_dir, "graph/graph_ctc_compact_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest, warmup_iters, benchmark_iters)
+
     @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
                              [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.035034996956786364, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.034996956786366405, True),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07032458972546472, False),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07099325602277286, True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03343627072534098, False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03327083563104297, True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06948260971971422, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06930595901703698, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.028530127814972613, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.0286442483262325, True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.055938711957663874, False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.056129759471180485, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.025954928127642368, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.026175508253373038, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05340739577608542, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.053564418622909636, True),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03305690809494827, False),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03294278758368838, True),
+                                 ("stt_en_conformer_ctc_small", "test-other", 0.06854784784976023, False),
+                                 ("stt_en_conformer_ctc_small", "test-other", 0.06936935215788166, True),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03064225579941914, False),
+                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03058711076798647, True),
+                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06746094056685248, False),
+                                 ("stt_en_conformer_ctc_small", "dev-other", 0.0674805684227055, True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, True),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05446764610358596, False),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05452496035764094, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.023565310098893424, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.024061615381787433, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.051640888749313024, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.051346470911517623, True),
                                  # Something is going wrong for the large models. Graph construction probably went wrong.
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
@@ -331,6 +401,8 @@ class TestGraphConstruction:
         """
         asr_model = nemo_asr.models.ASRModel.from_pretrained("stt_en_conformer_ctc_small", map_location=torch.device("cuda"))
 
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
         asr_model.preprocessor.featurizer.dither = 0.0
         asr_model.preprocessor.featurizer.pad_to = 0
         asr_model.eval()
@@ -352,7 +424,7 @@ class TestGraphConstruction:
         with ExitStack() as stack:
             stack.enter_context(torch.inference_mode())
             for batch in data_loader:
-                input_signal, input_signal_length, target = batch
+                input_signal, input_signal_length, target, utterance_ids = batch
                 input_signal = input_signal.cuda()
                 input_signal_length = input_signal_length.cuda()
                 log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
@@ -362,7 +434,7 @@ class TestGraphConstruction:
                     decoder1_config,
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-                    self.num_tokens_including_blank
+                    num_tokens_including_blank
                 )
 
                 decoder1.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
@@ -373,7 +445,7 @@ class TestGraphConstruction:
                     decoder2_config,
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-                    self.num_tokens_including_blank
+                    num_tokens_including_blank
                 )
                 decoder2.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
                 break
@@ -429,27 +501,24 @@ class TestGraphConstruction:
     def create_decoder_config():
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
-        config.online_opts.decoder_opts.default_beam = 50.0
+        config.online_opts.decoder_opts.default_beam = 17.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
         config.online_opts.decoder_opts.max_active = 10_000
         config.online_opts.determinize_lattice = True
-        config.online_opts.max_batch_size = 80
+        config.online_opts.max_batch_size = 200
         config.online_opts.num_channels = config.online_opts.max_batch_size * 2
         config.online_opts.frame_shift_seconds = 0.04
         config.online_opts.lattice_postprocessor_opts.acoustic_scale = 1.0
         config.online_opts.lattice_postprocessor_opts.lm_scale = 1.0
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
         config.online_opts.lattice_postprocessor_opts.nbest = 1
-        config.online_opts.num_decoder_copy_threads = 1
+        config.online_opts.num_decoder_copy_threads = 2
         config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
 
         return config
 
     def run_decoder(self, asr_model, graph_path: str, dataset: torch.utils.data.IterableDataset, half_precision: bool, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest):
-        # asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
-
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
-        # num_tokens_including_blank = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
 
         config = self.create_decoder_config()
         config.online_opts.decoder_opts.blank_penalty = blank_penalty
@@ -599,18 +668,27 @@ class TestGraphConstruction:
         print(f"GALVEZ: {dataset_string} flashlight wer=", my_wer)
         return predictions, references, durations, file_paths
 
-    def run_decoder_throughput(self, graph_path: str, dataset: torch.utils.data.IterableDataset,
-                               half_precision: bool, warmup_iters: int, benchmark_iters: int):
+    def run_decoder_throughput(self, asr_model,
+                               graph_path: str, dataset: torch.utils.data.IterableDataset,
+                               half_precision: bool,
+                               acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest,
+                               warmup_iters: int, benchmark_iters: int):
         assert warmup_iters > 0
         assert benchmark_iters > 0
-        asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
+
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
         config = self.create_decoder_config()
+        config.online_opts.decoder_opts.blank_penalty = blank_penalty
+        config.online_opts.decoder_opts.blank_ilabel = blank_ilabel
+        config.online_opts.decoder_opts.length_penalty = length_penalty
+        config.online_opts.lattice_postprocessor_opts.lm_scale = lm_scale
+        config.online_opts.lattice_postprocessor_opts.nbest = nbest
         decoder = BatchedMappedDecoderCuda(
             config,
-            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
-            os.path.join(graph_path, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-            self.num_tokens_including_blank
+            os.path.join(graph_path, "TLG.fst"),
+            os.path.join(graph_path, "words.txt"),
+            num_tokens_including_blank
         )
 
         data_loader = torch.utils.data.DataLoader(
@@ -622,7 +700,6 @@ class TestGraphConstruction:
 
         total_audio_length_samples = 0
 
-        # wer = torchmetrics.WordErrorRate()
         asr_model.preprocessor.featurizer.dither = 0.0
         asr_model.preprocessor.featurizer.pad_to = 0
         asr_model.eval()
@@ -641,21 +718,22 @@ class TestGraphConstruction:
                 torch.cuda.nvtx.range_push("iteration")
                 for batch in data_loader:
                     torch.cuda.nvtx.range_push("single batch")
-                    input_signal, input_signal_length, target = batch
+                    input_signal, input_signal_length, target, utterance_ids = batch
                     if i == 0:
                         total_audio_length_samples += torch.sum(input_signal_length) * benchmark_iters
                     input_signal = input_signal.cuda()
                     input_signal_length = input_signal_length.cuda()
                     torch.cuda.nvtx.range_push("ASR model")
                     log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                    log_probs *= acoustic_scale
                     torch.cuda.nvtx.range_pop()
                     cpu_lengths = lengths.to(torch.int64).to('cpu')
                     torch.cuda.nvtx.range_push("decoder")
                     decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
                     torch.cuda.nvtx.range_pop()
                     torch.cuda.nvtx.range_pop()
-                end_time = time.time_ns()
                 torch.cuda.nvtx.range_pop() # iteration
+        end_time = time.time_ns()
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
         print("RTFx:", input_time_seconds / run_time_seconds)
