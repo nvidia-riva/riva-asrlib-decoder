@@ -83,50 +83,59 @@ class CacheDataset(Dataset):
         return len(self.dataset)
 
 class TestGraphConstruction:
-    @pytest.fixture(autouse=True)
-    def setup(self):
-        self.temp_dir = os.path.abspath("tmp_graph_construction")
-        os.makedirs(self.temp_dir, exist_ok=True)
+    temp_dir = None
+    lm_path = None
+    words_path = None
+    gzipped_lm_path = None
+    original_dataset_map = None
+    dataset_map = None
 
-        lm_zip_file = os.path.join(self.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
+    @pytest.fixture(scope="class", autouse=True)
+    def setup(self):
+        print("GALVEZ: fixture!")
+        cls = self.__class__
+        cls.temp_dir = os.path.abspath("tmp_graph_construction")
+        os.makedirs(cls.temp_dir, exist_ok=True)
+
+        lm_zip_file = os.path.join(cls.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
             subprocess.check_call(
                 f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_lm/versions/deployable_v1.0/zip -O {lm_zip_file}",
                 shell=True,
             )
             with zipfile.ZipFile(lm_zip_file, 'r') as zip_ref:
-                zip_ref.extractall(self.temp_dir)
+                zip_ref.extractall(cls.temp_dir)
 
-        am_zip_file = os.path.join(self.temp_dir, "stt_en_conformer_ctc_small_1.6.0.zip")
+        am_zip_file = os.path.join(cls.temp_dir, "stt_en_conformer_ctc_small_1.6.0.zip")
         if not os.path.exists(am_zip_file):
             subprocess.check_call(
                 f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_conformer_ctc_small/versions/1.6.0/zip -O {am_zip_file}",
                 shell=True,
             )
             with zipfile.ZipFile(am_zip_file, 'r') as zip_ref:
-                zip_ref.extractall(self.temp_dir)
+                zip_ref.extractall(cls.temp_dir)
 
         # Work around: At the time of writing this test, the words.txt
         # file downloaded from NGC is simply a git lfs stub file, not
-        # the actual file itself, so overwrite self.words_path by
+        # the actual file itself, so overwrite cls.words_path by
         # exracting the symbol table from the arpa file
-        self.lm_path = os.path.join(self.temp_dir, "3-gram.pruned.3e-7.arpa")
-        self.words_path = os.path.join(self.temp_dir, "words.mixed_lm.3-gram.pruned.3e-7.txt")
-        temp_words_path = os.path.join(self.temp_dir, "words_with_ids.txt")
+        cls.lm_path = os.path.join(cls.temp_dir, "3-gram.pruned.3e-7.arpa")
+        cls.words_path = os.path.join(cls.temp_dir, "words.mixed_lm.3-gram.pruned.3e-7.txt")
+        temp_words_path = os.path.join(cls.temp_dir, "words_with_ids.txt")
         if not os.path.exists(temp_words_path):
             subprocess.check_call(
                 [
                     os.path.join(riva.asrlib.decoder.__path__[0], "scripts/prepare_TLG_fst/bin/arpa2fst"),
                     f"--write-symbol-table={temp_words_path}",
-                    self.lm_path,
+                    cls.lm_path,
                     "/dev/null",
                 ]
             )
-        self.gzipped_lm_path = self.lm_path + ".gz"
-        with open(self.lm_path, 'rb') as f_in, gzip.open(self.gzipped_lm_path, 'wb') as f_out:
+        cls.gzipped_lm_path = cls.lm_path + ".gz"
+        with open(cls.lm_path, 'rb') as f_in, gzip.open(cls.gzipped_lm_path, 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
 
-        with open(temp_words_path, "r") as words_with_ids_fh, open(self.words_path, "w") as words_fh:
+        with open(temp_words_path, "r") as words_with_ids_fh, open(cls.words_path, "w") as words_fh:
             for word_with_id in words_with_ids_fh:
                 word = word_with_id.split()[0].lower()
                 if word in {"<eps>", "<s>", "</s>", "<unk>"}:
@@ -134,25 +143,25 @@ class TestGraphConstruction:
                 words_fh.write(word)
                 words_fh.write("\n")
 
-        librispeech_test_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-clean", download=True)
-        librispeech_test_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "test-other", download=True)
-        librispeech_dev_clean = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "dev-clean", download=True)
-        librispeech_dev_other = torchaudio.datasets.LIBRISPEECH(self.temp_dir, "dev-other", download=True)
+        librispeech_test_clean = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "test-clean", download=True)
+        librispeech_test_other = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "test-other", download=True)
+        librispeech_dev_clean = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "dev-clean", download=True)
+        librispeech_dev_other = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "dev-other", download=True)
 
-        self.original_dataset_map = {"test-clean": librispeech_test_clean,
+        cls.original_dataset_map = {"test-clean": librispeech_test_clean,
                                      "test-other": librispeech_test_other,
                                      "dev-clean": librispeech_dev_clean,
                                      "dev-other": librispeech_dev_other,}
-        self.dataset_map = {}
+        cls.dataset_map = {}
 
-        for key, dataset in self.original_dataset_map.items():
+        for key, dataset in cls.original_dataset_map.items():
             dataset = CacheDataset(dataset)
             lengths = []
             for i in range(len(dataset)):
                 waveform, *_ = dataset[i]
                 lengths.append(waveform.size(1))
             sorted_indices = list(np.argsort(lengths))
-            self.dataset_map[key] = Subset(dataset, sorted_indices)
+            cls.dataset_map[key] = Subset(dataset, sorted_indices)
 
 
     def test_eesen_ctc_topo(self):
@@ -170,7 +179,7 @@ class TestGraphConstruction:
     # for every single test case... Ugh.
     @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
                              [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.036043061472915396, False),
+                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03505401704199635, False),
                                  ("stt_en_conformer_ctc_small", "test-clean", 0.03649954351795496, True),
                                  ("stt_en_conformer_ctc_small", "test-other", 0.07334314043902719, False),
                                  ("stt_en_conformer_ctc_small", "test-other", 0.07336224519037884, True),
@@ -178,15 +187,14 @@ class TestGraphConstruction:
                                  ("stt_en_conformer_ctc_small", "dev-clean", 0.034447262968273225, True),
                                  ("stt_en_conformer_ctc_small", "dev-other", 0.07225013739499098, False),
                                  ("stt_en_conformer_ctc_small", "dev-other", 0.07207348669231373, True),
-                                 
-                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.029367011564211808, False),
-                                 # ("stt_en_conformer_ctc_medium", "test-clean", 0.02972839318320146, True),
-                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.058460539136083144, False),
-                                 # ("stt_en_conformer_ctc_medium", "test-other", 0.058460539136083144, True),
-                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 0.027278408882026397, False),
-                                 # ("stt_en_conformer_ctc_medium", "dev-clean", 0.027296790559170617, True),
-                                 # ("stt_en_conformer_ctc_medium", "dev-other", 0.055703854910889535, False),
-                                 # ("stt_en_conformer_ctc_medium", "dev-other", 0.055644971343330456, True),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.029367011564211808, False),
+                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02972839318320146, True),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.058460539136083144, False),
+                                 ("stt_en_conformer_ctc_medium", "test-other", 0.058460539136083144, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.027278408882026397, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.027296790559170617, True),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.055703854910889535, False),
+                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.055644971343330456, True),
                                  # Something is going wrong for the large models. Graph construction probably went wrong.
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
                                  # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
@@ -204,10 +212,6 @@ class TestGraphConstruction:
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc", work_dir, nemo_model_name)
 
-        global snapshots
-        import tracemalloc
-        if not tracemalloc.is_tracing():
-            tracemalloc.start()
         for acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest in itertools.product(
                 [1.0 / 0.55], # 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0): #0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
                 [1024],
@@ -219,13 +223,7 @@ class TestGraphConstruction:
             my_wer, _, _ = self.run_decoder(asr_model, work_dir, self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest)
             print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
             print(f"GALVEZ:model={nemo_model_name} dataset={dataset} wer={my_wer}")
-        snapshots.append(tracemalloc.take_snapshot())
-        if len(snapshots) > 1:
-            top_stats = snapshots[-1].compare_to(snapshots[-2], 'lineno')
-            print("[ Top differences ]")
-            for stat in top_stats:
-                print(stat)
-
+            assert my_wer <= expected_wer
         import psutil
         process = psutil.Process(os.getpid())
         mem_gib = process.memory_info().rss / 1024 / 1024 /1024
@@ -571,7 +569,7 @@ class TestGraphConstruction:
         config.n_input_per_chunk = 50
         config.online_opts.decoder_opts.default_beam = 50.0
         config.online_opts.decoder_opts.lattice_beam = 8.0
-        config.online_opts.decoder_opts.max_active = 1_000
+        config.online_opts.decoder_opts.max_active = 10_000
         # From when I was testing some penalties discussed in wenet. These can be added back later.
         # config.online_opts.decoder_opts.blank_penalty = 0.01
         # config.online_opts.decoder_opts.blank_ilabel = 1024
