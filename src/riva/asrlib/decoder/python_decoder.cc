@@ -173,31 +173,29 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
   // pyclass.def(nb::init<const BatchedMappedDecoderCudaConfig&,
   //                      const fst::Fst<fst::StdArc>&,
   //                      std::unique_ptr<kaldi::TransitionInformation> &&>());
-  pyclass.def("__init__", [](PyClass* decoder,
-                          const riva::asrlib::BatchedMappedDecoderCudaConfig& config,
-                          const std::string& wfst_path_on_disk,
-                          const std::string& symbol_table_path_on_disk,
-                          int num_tokens_including_blank) {
-    std::unique_ptr<kaldi::TransitionInformation> trans_info =
-        std::make_unique<riva::asrlib::CTCTransitionInformation>(num_tokens_including_blank);
-    std::unique_ptr<fst::Fst<fst::StdArc>> decode_fst =
-        std::unique_ptr<fst::Fst<fst::StdArc>>(fst::ReadFstKaldiGeneric(wfst_path_on_disk));
+  pyclass.def(
+      "__init__", [](PyClass* decoder, const riva::asrlib::BatchedMappedDecoderCudaConfig& config,
+                     const std::string& wfst_path_on_disk,
+                     const std::string& symbol_table_path_on_disk, int num_tokens_including_blank) {
+        std::unique_ptr<kaldi::TransitionInformation> trans_info =
+            std::make_unique<riva::asrlib::CTCTransitionInformation>(num_tokens_including_blank);
+        std::unique_ptr<fst::Fst<fst::StdArc>> decode_fst =
+            std::unique_ptr<fst::Fst<fst::StdArc>>(fst::ReadFstKaldiGeneric(wfst_path_on_disk));
 
-    auto word_syms =
-        std::unique_ptr<fst::SymbolTable>(fst::SymbolTable::ReadText(symbol_table_path_on_disk));
+        auto word_syms = std::unique_ptr<fst::SymbolTable>(
+            fst::SymbolTable::ReadText(symbol_table_path_on_disk));
 
-    new (decoder) PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
-                          });
+        new (decoder) PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
+      });
 
-  using LogitsArray = nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
+  using LogitsArray =
+      nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
   using LogitsLengthsArray = nb::ndarray<long, nb::shape<nb::any>, nb::c_contig, nb::device::cpu>;
 
   pyclass.def(
-              "decode_write_lattice",
-              [](PyClass& cuda_pipeline, LogitsArray& logits,
-                 LogitsLengthsArray& logits_lengths,
-                 const std::vector<std::string>& keys,
-                 const std::string& output_wspecifier) {
+      "decode_write_lattice",
+      [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths,
+         const std::vector<std::string>& keys, const std::string& output_wspecifier) {
         int64_t batch_size = logits_lengths.shape(0);
 
         kaldi::CompactLatticeWriter clat_writer(output_wspecifier);
@@ -209,24 +207,21 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
           // number of cols is number of logits
           // stride of each row is stride. Always greater than number of cols
           auto write_results =
-              [i, &clat_writer, &keys](
-                  riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
-              const kaldi::CompactLattice& lattice = std::get<0>(asr_results).value();
-              clat_writer.Write(keys[i], lattice);
+              [i, &clat_writer,
+               &keys](riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
+                const kaldi::CompactLattice& lattice = std::get<0>(asr_results).value();
+                clat_writer.Write(keys[i], lattice);
               };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits_start,
-              logits.stride(1),
-              valid_time_steps,
-              write_results);
+              single_sample_logits_start, logits.stride(1), valid_time_steps, write_results);
         }
         cuda_pipeline.WaitForAllTasks();
       });
 
 
-  pyclass.def("decode_mbr",
-      [](PyClass& cuda_pipeline, LogitsArray& logits,
-         LogitsLengthsArray& logits_lengths)
+  pyclass.def(
+      "decode_mbr",
+      [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
         int64_t batch_size = logits_lengths.shape(0);
         std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
@@ -240,29 +235,27 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
                 for (size_t iword = 0; iword < ctm_result.times_seconds.size(); ++iword) {
                   results[i].emplace_back(
                       word_syms.Find(ctm_result.words[iword]),
-                      ctm_result.times_seconds[iword].first,
-                      ctm_result.times_seconds[iword].second,
+                      ctm_result.times_seconds[iword].first, ctm_result.times_seconds[iword].second,
                       ctm_result.conf[iword]);
                 }
               };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits_start,
-              logits.stride(1),
-              valid_time_steps,
-              place_results);
+              single_sample_logits_start, logits.stride(1), valid_time_steps, place_results);
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
       });
 
-  pyclass.def("decode_map",
-              [](PyClass& cuda_pipeline, LogitsArray& logits,
-                 LogitsLengthsArray& logits_lengths)
-              -> std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
-              {
+  pyclass.def(
+      "decode_map",
+      [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths)
+          -> std::vector<
+              std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>> {
         int64_t batch_size = logits_lengths.shape(0);
         // batch, nbest result, words with times
-        std::vector<std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>> results(batch_size);
+        std::vector<
+            std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
+            results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = logits_lengths(i);
 
@@ -274,37 +267,36 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
           auto place_results =
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
-                const std::vector<kaldi::cuda_decoder::NBestResult>& nbest_results = std::get<2>(asr_results).value();
+                const std::vector<kaldi::cuda_decoder::NBestResult>& nbest_results =
+                    std::get<2>(asr_results).value();
                 // this type doesn't match results above
-                std::vector<
-                std::tuple<float, // score
-                std::vector<std::tuple<std::string, float, float>>
-                >> result_this_utt;
-                for (const kaldi::cuda_decoder::NBestResult& nbest_result: nbest_results) {
-                  std::vector<std::tuple<std::string, float, float>> words; words.reserve(nbest_result.words.size());
+                std::vector<std::tuple<
+                    float,  // score
+                    std::vector<std::tuple<std::string, float, float>>>>
+                    result_this_utt;
+                for (const kaldi::cuda_decoder::NBestResult& nbest_result : nbest_results) {
+                  std::vector<std::tuple<std::string, float, float>> words;
+                  words.reserve(nbest_result.words.size());
                   std::size_t i = 0;
-                  for (auto&& word_id: nbest_result.words) {
-                    words.emplace_back(word_syms.Find(word_id),
-                                       nbest_result.times_seconds[i].first,
-                                       nbest_result.times_seconds[i].second);
+                  for (auto&& word_id : nbest_result.words) {
+                    words.emplace_back(
+                        word_syms.Find(word_id), nbest_result.times_seconds[i].first,
+                        nbest_result.times_seconds[i].second);
                     ++i;
                   }
                   result_this_utt.emplace_back(nbest_result.score, words);
                 }
 
                 results[i] = std::move(result_this_utt);
-          };
+              };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits_start,
-              logits.stride(1),
-              valid_time_steps,
-              place_results);
+              single_sample_logits_start, logits.stride(1), valid_time_steps, place_results);
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
-              });
+      });
 }
-} // anonymous namespace
+}  // anonymous namespace
 
 NB_MODULE(python_decoder, m)
 {

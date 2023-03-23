@@ -22,7 +22,6 @@ if __name__ == "__main__":
     with_sefloops = len(sys.argv) <= 2 or sys.argv[2] != "false"
 
     with open(sys.argv[1], "r") as fread:
-
         print("0 1 <eps> <eps>")
         print("1 1 <blk> <eps>")
         print("2 2 <blk> <eps>")
