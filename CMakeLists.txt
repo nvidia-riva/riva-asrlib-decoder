@@ -26,7 +26,7 @@ option(RIVA_ASRLIB_BUILD_PYTHON_BINDINGS "Whether to build python bindings." ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-set (CMAKE_BUILD_TYPE Debug)
+# set (CMAKE_BUILD_TYPE Debug)
 # set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer")
 
 # set (CMAKE_BUILD_TYPE RelWithDebInfo)
