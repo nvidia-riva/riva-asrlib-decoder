@@ -30,9 +30,9 @@ sil_token="<space>"   # the character you have used to represent spaces
 . parse_options.sh || exit 1;
 . path.sh || exit 1
 
-# set -e
+set -e
 set -u
-# set -o pipefail
+set -o pipefail
 
 
 lexicon=$1
@@ -124,9 +124,8 @@ else
     cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u > $dir/units_from_lexicon_sorted.txt
     sort $dir/units.txt > $dir/units_sorted.txt
     cmp $dir/units_sorted.txt $dir/units_from_lexicon_sorted.txt
-    if [ $? ]; then
+    if [ $? -ne 0 ]; then
         echo "ERROR: Difference in units.txt and units derived from lexicon!"
-        # exit 1
     fi
     comm -23 $dir/units_from_lexicon_sorted.txt $dir/units_sorted.txt > $dir/units_in_lexicon_only.txt
     grep -vF --file=$dir/units_in_lexicon_only.txt  $dir/lexicon.tmp > $dir/lexicon.txt
