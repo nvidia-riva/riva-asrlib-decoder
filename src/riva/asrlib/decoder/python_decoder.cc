@@ -224,8 +224,7 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
       });
 
 
-  pyclass.def(
-      "decode_mbr",
+  pyclass.def("decode_mbr",
       [](PyClass& cuda_pipeline, LogitsArray& logits,
          LogitsLengthsArray& logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
@@ -303,17 +302,6 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
-              });
-
-  pyclass.def("decode_do_nothing",
-              [](PyClass& cuda_pipeline, const nb::ndarray<>& managed_logits,
-                 const nb::ndarray<>& managed_logits_lengths)
-              {
-                // doesn't work. Still end up running out of GPU memory.
-                // managed_logits.deleter();
-                // managed_logits_lengths.deleter();
-                // see if this causes a memory leak
-                return;
               });
 }
 } // anonymous namespace
