@@ -47,8 +47,6 @@ set -e
 set -u
 set -o pipefail
 
-set -x
-
 lexicon_path=$1
 lm_path=$2
 dest_dir=$3
