@@ -107,7 +107,9 @@ def main():
         help="Path to the text file to tokenize, it can be a plain text file or JSON manifest",
     )
     parser.add_argument(
-        "--tokenizer_dir", type=str, help="The directory path to the tokenizer vocabulary + additional metadata",
+        "--tokenizer_dir",
+        type=str,
+        help="The directory path to the tokenizer vocabulary + additional metadata",
     )
     parser.add_argument(
         "--tokenizer_type",
@@ -116,10 +118,15 @@ def main():
         help="The type of the tokenizer. Currently supports `bpe` and `wpe`",
     )
     parser.add_argument(
-        "--nemo_model", type=str, help="The .nemo model path to extract the tokenizer",
+        "--nemo_model",
+        type=str,
+        help="The .nemo model path to extract the tokenizer",
     )
     parser.add_argument(
-        "--output_file", required=True, type=str, help="The path to store the tokenized subwords",
+        "--output_file",
+        required=True,
+        type=str,
+        help="The path to store the tokenized subwords",
     )
     parser.add_argument(
         "--do_lowercase", action='store_true', help="Whether to apply lower case conversion on the text"

@@ -26,6 +26,7 @@ import more_itertools
 import torch
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
+
 def download_test_data(output_dir: pathlib.Path):
     for file_name in ["logits.ark", "TLG.fst"]:
         url = "https://riva-asrlib-decoder-assets.s3.us-east-2.amazonaws.com/" + file_name

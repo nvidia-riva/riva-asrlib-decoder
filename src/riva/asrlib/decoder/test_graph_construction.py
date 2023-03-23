@@ -13,18 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-# os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
-
 import glob
 import gzip
-from contextlib import ExitStack
 import itertools
 import json
+import logging
 import multiprocessing
 import os
 import pathlib
-import pytest
 import shlex
 import shutil
 import subprocess
@@ -33,32 +29,37 @@ import tempfile
 import time
 import unittest
 import zipfile
+from contextlib import ExitStack
 
 import more_itertools
 import nemo.collections.asr as nemo_asr
-from nemo.collections.asr.models import ASRModel
-from nemo.collections.asr.metrics.wer import CTCDecodingConfig
 import numpy as np
-from ruamel.yaml import YAML
+import pytest
 import torch
 import torchaudio
 import torchmetrics
+from nemo.collections.asr.metrics.wer import CTCDecodingConfig
+from nemo.collections.asr.models import ASRModel
+from ruamel.yaml import YAML
+from torch.utils.data import Dataset, Subset
 from tqdm import tqdm
-
-# importing this causes pytest never to finish "collecting". No idea why.
-# import pywrapfst
 
 import riva.asrlib.decoder
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
 
-from torch.utils.data import Dataset, Subset
+# os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
 
-import logging
+
+# importing this causes pytest never to finish "collecting". No idea why.
+# import pywrapfst
+
+
 logging.getLogger("nemo").setLevel(logging.INFO)
 
 
 # torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 # torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
+
 
 # Not as good as it could be. Doesn't support num_workers > 0. And
 # that's hard to support because of multiprocessing, unfortunately.
@@ -75,6 +76,7 @@ class CacheDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.dataset)
+
 
 class TestGraphConstruction:
     temp_dir = None
@@ -141,10 +143,12 @@ class TestGraphConstruction:
         librispeech_dev_clean = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "dev-clean", download=True)
         librispeech_dev_other = torchaudio.datasets.LIBRISPEECH(cls.temp_dir, "dev-other", download=True)
 
-        cls.original_dataset_map = {"test-clean": librispeech_test_clean,
-                                     "test-other": librispeech_test_other,
-                                     "dev-clean": librispeech_dev_clean,
-                                     "dev-other": librispeech_dev_other,}
+        cls.original_dataset_map = {
+            "test-clean": librispeech_test_clean,
+            "test-other": librispeech_test_other,
+            "dev-clean": librispeech_dev_clean,
+            "dev-other": librispeech_dev_other,
+        }
         cls.dataset_map = {}
 
         for key, dataset in cls.original_dataset_map.items():
@@ -156,208 +160,312 @@ class TestGraphConstruction:
             sorted_indices = list(np.argsort(lengths))
             cls.dataset_map[key] = Subset(dataset, sorted_indices)
 
-
     def test_eesen_ctc_topo(self):
         self.create_TLG("ctc_eesen", os.path.join(self.temp_dir, "ctc_eesen"))
 
-
-    @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
-                             [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07055384674168466, False),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.07116519878493781, True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.034355354582552115, True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06969851613409751, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06987516683677475, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05708499703876354, False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05737156830903846, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.027811477519208854, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.0547224621182382, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05462432283897307, True),
-                                 # Something is going wrong for the large models. Graph construction probably went wrong.
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
-                             ])
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, expected_wer, half_precision",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
+            ("stt_en_conformer_ctc_small", "test-other", 0.07055384674168466, False),
+            ("stt_en_conformer_ctc_small", "test-other", 0.07116519878493781, True),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.034355354582552115, True),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.06969851613409751, False),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.06987516683677475, True),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05708499703876354, False),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05737156830903846, True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.027811477519208854, False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.0547224621182382, False),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.05462432283897307, True),
+            # Something is going wrong for the large models. Graph construction probably went wrong.
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
+        ],
+    )
     def test_vanilla_ctc_topo_wer(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc", work_dir, nemo_model_name)
 
-        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
-        my_wer, _, _ = self.run_decoder(asr_model, os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest)
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
+        my_wer, _, _ = self.run_decoder(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+        )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + 0.0001
 
-    @pytest.mark.parametrize("nemo_model_name, dataset, half_precision",
-                             [
-                                 ("stt_en_conformer_ctc_small", "test-clean", False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", True),
-                                 ("stt_en_conformer_ctc_small", "test-other", False),
-                                 ("stt_en_conformer_ctc_small", "test-other", True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", True),
-                                 # Something is going wrong for the large models. Graph construction probably went wrong.
-                                 # ("stt_en_conformer_ctc_large", "test-clean", False),
-                                 # ("stt_en_conformer_ctc_large", "test-clean", True),
-                                 # ("stt_en_conformer_ctc_large", "test-other", False),
-                                 # ("stt_en_conformer_ctc_large", "test-other", True),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", False),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", True),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", False),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", True),
-                             ])
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, half_precision",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", False),
+            ("stt_en_conformer_ctc_small", "test-clean", True),
+            ("stt_en_conformer_ctc_small", "test-other", False),
+            ("stt_en_conformer_ctc_small", "test-other", True),
+            ("stt_en_conformer_ctc_small", "dev-clean", False),
+            ("stt_en_conformer_ctc_small", "dev-clean", True),
+            ("stt_en_conformer_ctc_small", "dev-other", False),
+            ("stt_en_conformer_ctc_small", "dev-other", True),
+            ("stt_en_conformer_ctc_medium", "test-clean", False),
+            ("stt_en_conformer_ctc_medium", "test-clean", True),
+            ("stt_en_conformer_ctc_medium", "test-other", False),
+            ("stt_en_conformer_ctc_medium", "test-other", True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", True),
+            ("stt_en_conformer_ctc_medium", "dev-other", False),
+            ("stt_en_conformer_ctc_medium", "dev-other", True),
+            # Something is going wrong for the large models. Graph construction probably went wrong.
+            # ("stt_en_conformer_ctc_large", "test-clean", False),
+            # ("stt_en_conformer_ctc_large", "test-clean", True),
+            # ("stt_en_conformer_ctc_large", "test-other", False),
+            # ("stt_en_conformer_ctc_large", "test-other", True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", True),
+            # ("stt_en_conformer_ctc_large", "dev-other", False),
+            # ("stt_en_conformer_ctc_large", "dev-other", True),
+        ],
+    )
     def test_vanilla_ctc_topo_throughput(self, nemo_model_name, dataset, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc", work_dir, nemo_model_name)
 
-        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
         warmup_iters = 2
         benchmark_iters = 2
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision}")
-        self.run_decoder_throughput(asr_model, os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest, warmup_iters, benchmark_iters)
+        self.run_decoder_throughput(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+            warmup_iters,
+            benchmark_iters,
+        )
 
-    @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
-                             [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03164942178940962, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03174452221545952, True),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.06761171503352884, False),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.0683185908335403, True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.029631263556486893, False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.02968640858791956, True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06661694276517233, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.0668132213237026, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.026361838101034693, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02655203895313451, True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.052996580249508055, False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05324494201707965, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.02249917282452851, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.022682989595970735, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05034545026301327, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.05032582240716024, True),
-                                 # Something is going wrong for the large models. Graph construction probably went wrong.
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
-                             ])
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, expected_wer, half_precision",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03164942178940962, False),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03174452221545952, True),
+            ("stt_en_conformer_ctc_small", "test-other", 0.06761171503352884, False),
+            ("stt_en_conformer_ctc_small", "test-other", 0.0683185908335403, True),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.029631263556486893, False),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.02968640858791956, True),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.06661694276517233, False),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.0668132213237026, True),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.026361838101034693, False),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.02655203895313451, True),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.052996580249508055, False),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05324494201707965, True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.02249917282452851, False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.022682989595970735, True),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.05034545026301327, False),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.05032582240716024, True),
+            # Something is going wrong for the large models. Graph construction probably went wrong.
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
+        ],
+    )
     def test_compact_ctc_topo_wer(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_compact_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc_compact", work_dir, nemo_model_name)
 
-        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
-        my_wer, _, _ = self.run_decoder(asr_model, os.path.join(work_dir, "graph/graph_ctc_compact_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest)
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
+        my_wer, _, _ = self.run_decoder(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_compact_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+        )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} compact half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + 0.0001
 
-    @pytest.mark.parametrize("nemo_model_name, dataset, half_precision",
-                             [
-                                 ("stt_en_conformer_ctc_small", "test-clean", False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", True),
-                                 ("stt_en_conformer_ctc_small", "test-other", False),
-                                 ("stt_en_conformer_ctc_small", "test-other", True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", True),
-                                 # Something is going wrong for the large models. Graph construction probably went wrong.
-                                 # ("stt_en_conformer_ctc_large", "test-clean", False),
-                                 # ("stt_en_conformer_ctc_large", "test-clean", True),
-                                 # ("stt_en_conformer_ctc_large", "test-other", False),
-                                 # ("stt_en_conformer_ctc_large", "test-other", True),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", False),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", True),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", False),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", True),
-                             ])
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, half_precision",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", False),
+            ("stt_en_conformer_ctc_small", "test-clean", True),
+            ("stt_en_conformer_ctc_small", "test-other", False),
+            ("stt_en_conformer_ctc_small", "test-other", True),
+            ("stt_en_conformer_ctc_small", "dev-clean", False),
+            ("stt_en_conformer_ctc_small", "dev-clean", True),
+            ("stt_en_conformer_ctc_small", "dev-other", False),
+            ("stt_en_conformer_ctc_small", "dev-other", True),
+            ("stt_en_conformer_ctc_medium", "test-clean", False),
+            ("stt_en_conformer_ctc_medium", "test-clean", True),
+            ("stt_en_conformer_ctc_medium", "test-other", False),
+            ("stt_en_conformer_ctc_medium", "test-other", True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", True),
+            ("stt_en_conformer_ctc_medium", "dev-other", False),
+            ("stt_en_conformer_ctc_medium", "dev-other", True),
+            # Something is going wrong for the large models. Graph construction probably went wrong.
+            # ("stt_en_conformer_ctc_large", "test-clean", False),
+            # ("stt_en_conformer_ctc_large", "test-clean", True),
+            # ("stt_en_conformer_ctc_large", "test-other", False),
+            # ("stt_en_conformer_ctc_large", "test-other", True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", True),
+            # ("stt_en_conformer_ctc_large", "dev-other", False),
+            # ("stt_en_conformer_ctc_large", "dev-other", True),
+        ],
+    )
     def test_compact_ctc_topo_throughput(self, nemo_model_name, dataset, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_compact_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc_compact", work_dir, nemo_model_name)
 
-        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
         warmup_iters = 2
         benchmark_iters = 2
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} compact half_precision={half_precision}")
-        self.run_decoder_throughput(asr_model, os.path.join(work_dir, "graph/graph_ctc_compact_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest, warmup_iters, benchmark_iters)
+        self.run_decoder_throughput(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_compact_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+            warmup_iters,
+            benchmark_iters,
+        )
 
-    @pytest.mark.parametrize("nemo_model_name, dataset, expected_wer, half_precision",
-                             [
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03305690809494827, False),
-                                 ("stt_en_conformer_ctc_small", "test-clean", 0.03294278758368838, True),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.06854784784976023, False),
-                                 ("stt_en_conformer_ctc_small", "test-other", 0.06936935215788166, True),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03064225579941914, False),
-                                 ("stt_en_conformer_ctc_small", "dev-clean", 0.03058711076798647, True),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.06746094056685248, False),
-                                 ("stt_en_conformer_ctc_small", "dev-other", 0.0674805684227055, True),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, False),
-                                 ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, True),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05446764610358596, False),
-                                 ("stt_en_conformer_ctc_medium", "test-other", 0.05452496035764094, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.023565310098893424, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-clean", 0.024061615381787433, True),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.051640888749313024, False),
-                                 ("stt_en_conformer_ctc_medium", "dev-other", 0.051346470911517623, True),
-                                 # Something is going wrong for the large models. Graph construction probably went wrong.
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
-                                 # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
-                             ])
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, expected_wer, half_precision",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03305690809494827, False),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03294278758368838, True),
+            ("stt_en_conformer_ctc_small", "test-other", 0.06854784784976023, False),
+            ("stt_en_conformer_ctc_small", "test-other", 0.06936935215788166, True),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.03064225579941914, False),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.03058711076798647, True),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.06746094056685248, False),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.0674805684227055, True),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, False),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, True),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05446764610358596, False),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05452496035764094, True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.023565310098893424, False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.024061615381787433, True),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.051640888749313024, False),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.051346470911517623, True),
+            # Something is going wrong for the large models. Graph construction probably went wrong.
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04460959440612881, True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025943396226415096, False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 1.025924376141205113, True),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04447586114666718, False),
+            # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
+        ],
+    )
     def test_identity_ctc_topo(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_identity_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("identity", work_dir, nemo_model_name)
 
-        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = 1.0 / 0.55, 1024, 0.0, -0.5, 0.8, 1
-        my_wer, _, _ = self.run_decoder(asr_model, os.path.join(work_dir, "graph/graph_identity_3-gram.pruned.3e-7"), self.dataset_map[dataset], half_precision, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest)
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
+        my_wer, _, _ = self.run_decoder(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_identity_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+        )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
-        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} identity half_precision={half_precision} wer={my_wer}")
+        print(
+            f"GALVEZ:model={nemo_model_name} dataset={dataset} identity half_precision={half_precision} wer={my_wer}"
+        )
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + 0.0001
 
@@ -365,24 +473,37 @@ class TestGraphConstruction:
     # because the code to create a kenlm language model is not
     # directly part of the NeMo library.
     @pytest.mark.skip
-    @pytest.mark.parametrize("dataset_name,",
-                             ["test-clean", "test-other"])
+    @pytest.mark.parametrize("dataset_name,", ["test-clean", "test-other"])
     def test_flashlight_alone(self, dataset_name):
         _ = self.run_decoder_flashlight(dataset_name)
 
-    @pytest.mark.skip        
-    @pytest.mark.parametrize("dataset_name, nbest",
-                             [("test-clean", 10 ),
-                              ("test-clean", 1 ),
-                              ("test-other", 10 ),
-                              ("test-other", 1 ),
-                             ])
+    @pytest.mark.skip
+    @pytest.mark.parametrize(
+        "dataset_name, nbest",
+        [
+            ("test-clean", 10),
+            ("test-clean", 1),
+            ("test-other", 10),
+            ("test-other", 1),
+        ],
+    )
     def test_flashlight_vs_wfst(self, dataset_name, nbest):
         work_dir = os.path.join(self.temp_dir, "ctc")
         flashlight_predictions, references, durations, file_paths = self.run_decoder_flashlight(dataset_name)
         # No caching or sorting by sequence length allowed here
         dataset = CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, dataset_name, download=True))
-        _, wfst_predictions, wfst_references = self.run_decoder(asr_model, os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"), dataset, False, 1.0 / 0.55, 0.0, 1024, -0.5, 0.8, nbest)
+        _, wfst_predictions, wfst_references = self.run_decoder(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"),
+            dataset,
+            False,
+            1.0 / 0.55,
+            0.0,
+            1024,
+            -0.5,
+            0.8,
+            nbest,
+        )
 
         with open(f"wfst_{dataset_name}_nbest_{nbest}.txt", "w") as fh:
             for utt_id, wfst_prediction in wfst_predictions:
@@ -393,13 +514,15 @@ class TestGraphConstruction:
                 fh.write(f"{utt_id} {reference}\n")
 
         flashlight_predictions, references, durations, file_paths = self.run_decoder_flashlight(dataset_name)
-            
+
     def test_delete_decoder(self):
         """Ensure that allocating a decoder, decoding with it, deleting it,
         and then reallocating a new one, and deocding with that one,
         does not crash.
         """
-        asr_model = nemo_asr.models.ASRModel.from_pretrained("stt_en_conformer_ctc_small", map_location=torch.device("cuda"))
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            "stt_en_conformer_ctc_small", map_location=torch.device("cuda")
+        )
 
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
@@ -419,7 +542,8 @@ class TestGraphConstruction:
             self.dataset_map["test-clean"],
             batch_size=decoder1_config.online_opts.max_batch_size,
             collate_fn=collate_fn,
-            pin_memory=True)
+            pin_memory=True,
+        )
 
         with ExitStack() as stack:
             stack.enter_context(torch.inference_mode())
@@ -427,14 +551,16 @@ class TestGraphConstruction:
                 input_signal, input_signal_length, target, utterance_ids = batch
                 input_signal = input_signal.cuda()
                 input_signal_length = input_signal_length.cuda()
-                log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
                 cpu_lengths = lengths.to(torch.int64).to('cpu')
 
                 decoder1 = BatchedMappedDecoderCuda(
                     decoder1_config,
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-                    num_tokens_including_blank
+                    num_tokens_including_blank,
                 )
 
                 decoder1.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
@@ -445,7 +571,7 @@ class TestGraphConstruction:
                     decoder2_config,
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
                     os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
-                    num_tokens_including_blank
+                    num_tokens_including_blank,
                 )
                 decoder2.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
                 break
@@ -513,11 +639,25 @@ class TestGraphConstruction:
         config.online_opts.lattice_postprocessor_opts.word_ins_penalty = 0.0
         config.online_opts.lattice_postprocessor_opts.nbest = 1
         config.online_opts.num_decoder_copy_threads = 2
-        config.online_opts.num_post_processing_worker_threads = multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
+        config.online_opts.num_post_processing_worker_threads = (
+            multiprocessing.cpu_count() - config.online_opts.num_decoder_copy_threads
+        )
 
         return config
 
-    def run_decoder(self, asr_model, graph_path: str, dataset: torch.utils.data.IterableDataset, half_precision: bool, acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest):
+    def run_decoder(
+        self,
+        asr_model,
+        graph_path: str,
+        dataset: torch.utils.data.IterableDataset,
+        half_precision: bool,
+        acoustic_scale,
+        blank_penalty,
+        blank_ilabel,
+        length_penalty,
+        lm_scale,
+        nbest,
+    ):
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
         config = self.create_decoder_config()
@@ -531,15 +671,12 @@ class TestGraphConstruction:
             config,
             os.path.join(graph_path, "TLG.fst"),
             os.path.join(graph_path, "words.txt"),
-            num_tokens_including_blank
-            )
+            num_tokens_including_blank,
+        )
 
         data_loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=config.online_opts.num_channels,
-            num_workers=0,
-            collate_fn=collate_fn,
-            pin_memory=True)
+            dataset, batch_size=config.online_opts.num_channels, num_workers=0, collate_fn=collate_fn, pin_memory=True
+        )
 
         references = []
         results = []
@@ -571,7 +708,9 @@ class TestGraphConstruction:
                 input_signal_length = input_signal_length.cuda()
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("forward")
-                log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
                 log_probs *= acoustic_scale
                 torch.cuda.nvtx.range_pop()
                 # from IPython import embed; embed()
@@ -584,7 +723,7 @@ class TestGraphConstruction:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("beam search decoder")
                 # batch_results = decoder.decode_map(log_probs.to(torch.float32), cpu_lengths)
-                # Would ideally like to pass it just as DLTensor instead of 
+                # Would ideally like to pass it just as DLTensor instead of
                 # results.extend(decoder.decode_map(log_probs.to(torch.float32), cpu_lengths))
                 results.extend(decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths))
                 # print("GALVEZ:", results[-1])
@@ -635,14 +774,16 @@ class TestGraphConstruction:
         decoding_cfg.strategy = "flashlight"
         decoding_cfg.beam.search_type = "flashlight"
         decoding_cfg.beam.kenlm_path = os.path.join(self.temp_dir, 'lm.bin')
-        decoding_cfg.beam.flashlight_cfg.lexicon_path=os.path.join(self.temp_dir, 'flashlight_lexicon.txt/3-gram.pruned.3e-7.lexicon')
+        decoding_cfg.beam.flashlight_cfg.lexicon_path = os.path.join(
+            self.temp_dir, 'flashlight_lexicon.txt/3-gram.pruned.3e-7.lexicon'
+        )
         decoding_cfg.beam.beam_size = 32
         # Why set both of these small? It's a bit strange, isn't it?
         decoding_cfg.beam.beam_alpha = 0.2
         decoding_cfg.beam.beam_beta = 0.2
         decoding_cfg.beam.flashlight_cfg.beam_size_token = 32
         decoding_cfg.beam.flashlight_cfg.beam_threshold = 25.0
-        
+
         asr_model.change_decoding_strategy(decoding_cfg)
 
         file_paths = []
@@ -656,23 +797,35 @@ class TestGraphConstruction:
             references.append(transcript.lower())
 
         # Need to permute these arrays based on length as well...
-            
+
         # files = glob.glob(os.path.join(self.temp_dir, "LibriSpeech/test-clean/*/*/*.flac"))
         start_time = time.time()
-        predictions = asr_model.transcribe(paths2audio_files=file_paths, batch_size=160, return_hypotheses=False, logprobs=False)
+        predictions = asr_model.transcribe(
+            paths2audio_files=file_paths, batch_size=160, return_hypotheses=False, logprobs=False
+        )
         end_time = time.time()
         print("GALVEZ:difference=", end_time - start_time)
-        #print(predictions[:2])
-        #print(references[:2])
+        # print(predictions[:2])
+        # print(references[:2])
         my_wer = wer(references, predictions)
         print(f"GALVEZ: {dataset_string} flashlight wer=", my_wer)
         return predictions, references, durations, file_paths
 
-    def run_decoder_throughput(self, asr_model,
-                               graph_path: str, dataset: torch.utils.data.IterableDataset,
-                               half_precision: bool,
-                               acoustic_scale, blank_penalty, blank_ilabel, length_penalty, lm_scale, nbest,
-                               warmup_iters: int, benchmark_iters: int):
+    def run_decoder_throughput(
+        self,
+        asr_model,
+        graph_path: str,
+        dataset: torch.utils.data.IterableDataset,
+        half_precision: bool,
+        acoustic_scale,
+        blank_penalty,
+        blank_ilabel,
+        length_penalty,
+        lm_scale,
+        nbest,
+        warmup_iters: int,
+        benchmark_iters: int,
+    ):
         assert warmup_iters > 0
         assert benchmark_iters > 0
 
@@ -688,15 +841,12 @@ class TestGraphConstruction:
             config,
             os.path.join(graph_path, "TLG.fst"),
             os.path.join(graph_path, "words.txt"),
-            num_tokens_including_blank
+            num_tokens_including_blank,
         )
 
         data_loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=config.online_opts.num_channels,
-            num_workers=0,
-            collate_fn=collate_fn,
-            pin_memory=True)
+            dataset, batch_size=config.online_opts.num_channels, num_workers=0, collate_fn=collate_fn, pin_memory=True
+        )
 
         total_audio_length_samples = 0
 
@@ -724,7 +874,9 @@ class TestGraphConstruction:
                     input_signal = input_signal.cuda()
                     input_signal_length = input_signal_length.cuda()
                     torch.cuda.nvtx.range_push("ASR model")
-                    log_probs, lengths, _ = asr_model.forward(input_signal=input_signal, input_signal_length=input_signal_length)
+                    log_probs, lengths, _ = asr_model.forward(
+                        input_signal=input_signal, input_signal_length=input_signal_length
+                    )
                     log_probs *= acoustic_scale
                     torch.cuda.nvtx.range_pop()
                     cpu_lengths = lengths.to(torch.int64).to('cpu')
@@ -732,17 +884,19 @@ class TestGraphConstruction:
                     decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
                     torch.cuda.nvtx.range_pop()
                     torch.cuda.nvtx.range_pop()
-                torch.cuda.nvtx.range_pop() # iteration
+                torch.cuda.nvtx.range_pop()  # iteration
         end_time = time.time_ns()
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
         print("RTFx:", input_time_seconds / run_time_seconds)
         print("run time:", run_time_seconds)
         torch.cuda.cudart().cudaProfilerStop()
-    
+
+
 def write_ctm_output(key, result):
     for word, start, end in result:
         print(f"{key} 1 {start:.2f} {end - start:.2f} {word} 1.0")
+
 
 def collate_fn(batch):
     # A data tuple has the form:
@@ -770,6 +924,7 @@ def collate_fn(batch):
 
     return tensors, lengths, targets, utterance_ids
 
+
 def trace_back_stats(r, h, d):
     i = len(r)
     j = len(h)
@@ -779,14 +934,14 @@ def trace_back_stats(r, h, d):
     while True:
         if i == 0 and j == 0:
             break
-        elif i >= 1 and j >= 1 and d[i][j] == d[i-1][j-1] and r[i-1] == h[j-1]:
+        elif i >= 1 and j >= 1 and d[i][j] == d[i - 1][j - 1] and r[i - 1] == h[j - 1]:
             i = i - 1
             j = j - 1
-        elif j >= 1 and d[i][j] == d[i][j-1]+1:
+        elif j >= 1 and d[i][j] == d[i][j - 1] + 1:
             insertions += 1
             i = i
             j = j - 1
-        elif i >= 1 and j >= 1 and d[i][j] == d[i-1][j-1]+1:
+        elif i >= 1 and j >= 1 and d[i][j] == d[i - 1][j - 1] + 1:
             substitutions += 1
             i = i - 1
             j = j - 1
@@ -796,11 +951,13 @@ def trace_back_stats(r, h, d):
             j = j
     return insertions, substitutions, deletions
 
+
 # It does contain tonnay
 # def test_TLG_containts_tonnay(self):
 #     work_dir = os.path.join(self.temp_dir, "ctc")
 #     tlg = pywrapfst.Fst.read(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"))
 #     tlg.reverse()
+
 
 def wer(references, hypotheses):
     total_wer = 0
@@ -819,8 +976,9 @@ def wer(references, hypotheses):
         wer_ratio = 0
     else:
         wer_ratio = total_wer / total_words
-    
+
     return wer_ratio, total_insertions, total_substitutions, total_deletions
+
 
 def wer_single(r, h):
     """

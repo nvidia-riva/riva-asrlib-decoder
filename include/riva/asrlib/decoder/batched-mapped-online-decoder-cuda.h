@@ -20,12 +20,13 @@
 #include <cudadecoder/cuda-decoder-common.h>
 #include <cudadecoder/cuda-decoder.h>
 #include <cudadecoder/lattice-postprocessor.h>
-#include <optional>
 #include <fstext/lattice-utils.h>
 #include <itf/options-itf.h>
 #include <itf/transition-information.h>
 #include <lat/determinize-lattice-pruned.h>
 #include <lat/lattice-functions.h>
+
+#include <optional>
 
 #define KALDI_CUDA_DECODER_MIN_NCHANNELS_FACTOR 2
 
@@ -39,8 +40,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   BatchedMappedOnlineDecoderCudaConfig()
       : max_batch_size(400), num_channels(800), num_post_processing_worker_threads(-1),
         determinize_lattice(true), num_decoder_copy_threads(2),
-        frame_shift_seconds(std::numeric_limits<float>::max()),
-        use_lattice_postprocessor(true)
+        frame_shift_seconds(std::numeric_limits<float>::max()), use_lattice_postprocessor(true)
   {
   }
   void Register(kaldi::OptionsItf* po)
@@ -70,9 +70,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
         "cuda-decoder-frame-shift-seconds", &frame_shift_seconds,
         "The sampling period of log-likelihood vectors output by the "
         "acoustic model.");
-    po->Register(
-        "use-lattice-postprocessor", &use_lattice_postprocessor,
-        "");
+    po->Register("use-lattice-postprocessor", &use_lattice_postprocessor, "");
 
     decoder_opts.Register(po);
     det_opts.Register(po);
@@ -118,10 +116,9 @@ struct BatchedMappedOnlineDecoderCudaConfig {
 class BatchedMappedOnlineDecoderCuda {
  public:
   using CorrelationID = uint64_t;
-  using ReturnType =
-    std::tuple<std::optional<kaldi::CompactLattice>,
-               std::optional<kaldi::cuda_decoder::CTMResult>,
-               std::optional<std::vector<kaldi::cuda_decoder::NBestResult>>>;
+  using ReturnType = std::tuple<
+      std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>,
+      std::optional<std::vector<kaldi::cuda_decoder::NBestResult>>>;
   using LatticeCallback = std::function<void(ReturnType&)>;
   BatchedMappedOnlineDecoderCuda(
       const BatchedMappedOnlineDecoderCudaConfig& config, const fst::Fst<fst::StdArc>& decode_fst,
@@ -143,10 +140,10 @@ class BatchedMappedOnlineDecoderCuda {
         /*nlanes=*/config_.max_batch_size, config_.num_channels);
 
     if (config_.use_lattice_postprocessor) {
-        lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(
-                                                                                             config_.lattice_postprocessor_opts);
-        lattice_postprocessor_->SetTransitionInformation(trans_information_.get());
-        lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
+      lattice_postprocessor_ = std::make_unique<kaldi::cuda_decoder::LatticePostprocessor>(
+          config_.lattice_postprocessor_opts);
+      lattice_postprocessor_->SetTransitionInformation(trans_information_.get());
+      lattice_postprocessor_->SetDecoderFrameShift(config_.frame_shift_seconds);
     }
 
     cuda_decoder_->SetOutputFrameShiftInSeconds(config_.frame_shift_seconds);
@@ -290,7 +287,8 @@ class BatchedMappedOnlineDecoderCuda {
     for (std::size_t i = 0; i < list_channels_last_chunk.size(); ++i) {
       uint64_t ichannel = list_channels_last_chunk[i];
       LatticeCallback* lattice_callback = list_lattice_callbacks_last_chunk[i];
-      thread_pool_->submit(std::bind(&BatchedMappedOnlineDecoderCuda::FinalizeDecoding, this, ichannel, lattice_callback));
+      thread_pool_->submit(std::bind(
+          &BatchedMappedOnlineDecoderCuda::FinalizeDecoding, this, ichannel, lattice_callback));
     }
   }
 
@@ -377,15 +375,16 @@ class BatchedMappedOnlineDecoderCuda {
     // but doesn't return the result.
     ReturnType result;
     if (config_.use_lattice_postprocessor) {
-        kaldi::CompactLattice clat;
-        lattice_postprocessor_->GetPostprocessedLattice(dlat, &clat);
-        kaldi::cuda_decoder::CTMResult ctm;
-        // is this okay? I am modifying the refernece twice...
-        lattice_postprocessor_->GetCTM(dlat, &ctm);
-        std::vector<kaldi::cuda_decoder::NBestResult> nbest = lattice_postprocessor_->GetNBestList(dlat);
-        result = {std::make_optional(clat), std::make_optional(ctm), std::make_optional(nbest)};
+      kaldi::CompactLattice clat;
+      lattice_postprocessor_->GetPostprocessedLattice(dlat, &clat);
+      kaldi::cuda_decoder::CTMResult ctm;
+      // is this okay? I am modifying the refernece twice...
+      lattice_postprocessor_->GetCTM(dlat, &ctm);
+      std::vector<kaldi::cuda_decoder::NBestResult> nbest =
+          lattice_postprocessor_->GetNBestList(dlat);
+      result = {std::make_optional(clat), std::make_optional(ctm), std::make_optional(nbest)};
     } else {
-        result = {std::make_optional(dlat), std::nullopt, std::nullopt};
+      result = {std::make_optional(dlat), std::nullopt, std::nullopt};
     }
 
     // if ptr set and if callback func callable
