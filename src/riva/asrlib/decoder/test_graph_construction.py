@@ -30,6 +30,7 @@ import time
 import unittest
 import zipfile
 from contextlib import ExitStack
+from enum import Enum
 
 import more_itertools
 import nemo.collections.asr as nemo_asr
@@ -60,6 +61,10 @@ logging.getLogger("nemo").setLevel(logging.INFO)
 # torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 # torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 
+class DecodeType(Enum):
+    MBR = 1
+    NBEST = 2
+
 
 # Not as good as it could be. Doesn't support num_workers > 0. And
 # that's hard to support because of multiprocessing, unfortunately.
@@ -77,6 +82,14 @@ class CacheDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dataset)
 
+
+def load_word_symbols(path):
+    word_id_to_word_str = {}
+    with open(path, "rt") as fh:
+        for line in fh:
+            word_str, word_id = line.rstrip().split()
+            word_id_to_word_str[int(word_id)] = word_str
+    return word_id_to_word_str
 
 class TestGraphConstruction:
     temp_dir = None
@@ -193,7 +206,7 @@ class TestGraphConstruction:
             # ("stt_en_conformer_ctc_large", "dev-other", 1.04460959440612881, True),
         ],
     )
-    def test_vanilla_ctc_topo_wer(self, nemo_model_name, dataset, expected_wer, half_precision):
+    def test_vanilla_ctc_topo_wer_mbr(self, nemo_model_name, dataset, expected_wer, half_precision):
         work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
         asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
         self.create_TLG("ctc", work_dir, nemo_model_name)
@@ -217,6 +230,68 @@ class TestGraphConstruction:
             length_penalty,
             lm_scale,
             nbest,
+            DecodeType.MBR,
+        )
+        print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
+        print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
+        # Accept a very tiny margin of error
+        assert my_wer <= expected_wer + 0.0001
+
+
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, expected_wer, half_precision",
+        [
+            # ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
+            # ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
+            # ("stt_en_conformer_ctc_small", "test-other", 0.07055384674168466, False),
+            # ("stt_en_conformer_ctc_small", "test-other", 0.07116519878493781, True),
+            # ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
+            # ("stt_en_conformer_ctc_small", "dev-clean", 0.034355354582552115, True),
+            # ("stt_en_conformer_ctc_small", "dev-other", 0.06969851613409751, False),
+            # ("stt_en_conformer_ctc_small", "dev-other", 0.06987516683677475, True),
+            # ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
+            # ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
+            # ("stt_en_conformer_ctc_medium", "test-other", 0.05708499703876354, False),
+            # ("stt_en_conformer_ctc_medium", "test-other", 0.05737156830903846, True),
+            # ("stt_en_conformer_ctc_medium", "dev-clean", 0.027811477519208854, False),
+            # ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
+            # ("stt_en_conformer_ctc_medium", "dev-other", 0.0547224621182382, False),
+            # ("stt_en_conformer_ctc_medium", "dev-other", 0.05462432283897307, True),
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.027255782105903834, False),
+            # ("stt_en_conformer_ctc_large", "test-clean", 0.027369902617163724, True),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04529736545478861, False),
+            # ("stt_en_conformer_ctc_large", "test-other", 0.04531647020614027, True),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 0.02499908091614279, False),
+            # ("stt_en_conformer_ctc_large", "dev-clean", 0.02485202749898901, True),
+            # ("stt_en_conformer_ctc_large", "dev-other", 0.0434364450027479, False),
+            ("stt_en_conformer_ctc_large", "dev-other", 0.04367197927298422, True),
+        ],
+    )
+    def test_vanilla_ctc_topo_wer_nbest(self, nemo_model_name, dataset, expected_wer, half_precision):
+        work_dir = os.path.join(self.temp_dir, f"ctc_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale, nbest = (
+            1.0 / 0.55,
+            1024,
+            0.0,
+            -0.5,
+            0.8,
+            1,
+        )
+        my_wer, _, _ = self.run_decoder(
+            asr_model,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7"),
+            self.dataset_map[dataset],
+            half_precision,
+            acoustic_scale,
+            blank_penalty,
+            blank_ilabel,
+            length_penalty,
+            lm_scale,
+            nbest,
+            DecodeType.NBEST,
         )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
@@ -657,6 +732,7 @@ class TestGraphConstruction:
         length_penalty,
         lm_scale,
         nbest,
+        decode_type: DecodeType,
     ):
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
@@ -666,6 +742,8 @@ class TestGraphConstruction:
         config.online_opts.decoder_opts.length_penalty = length_penalty
         config.online_opts.lattice_postprocessor_opts.lm_scale = lm_scale
         config.online_opts.lattice_postprocessor_opts.nbest = nbest
+
+        word_id_to_word_str = load_word_symbols(os.path.join(graph_path, "words.txt"))
 
         decoder = BatchedMappedDecoderCuda(
             config,
@@ -722,22 +800,31 @@ class TestGraphConstruction:
 
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("beam search decoder")
-                # batch_results = decoder.decode_map(log_probs.to(torch.float32), cpu_lengths)
-                # Would ideally like to pass it just as DLTensor instead of
-                # results.extend(decoder.decode_map(log_probs.to(torch.float32), cpu_lengths))
-                results.extend(decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths))
-                # print("GALVEZ:", results[-1])
+                if decode_type == DecodeType.MBR:
+                    results.extend(decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths))
+                elif decode_type == DecodeType.NBEST:
+                    results.extend(decoder.decode_nbest(log_probs.to(torch.float32), cpu_lengths))
+                else:
+                    assert False, decode_type
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()
             end_time = time.time_ns()
+            print("GALVEZ: results=", [piece[0].ilabels for piece in results])
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
-        print("RTFx:", input_time_seconds / run_time_seconds)
+        print("non-warmed-up RTFx:", input_time_seconds / run_time_seconds)
         # print("run time:", run_time_seconds)
         predictions = []
-        for result in results:
-            predictions.append(" ".join(piece[0] for piece in result))
+        if decode_type == DecodeType.MBR:
+            for result in results:
+                predictions.append(" ".join(piece[0] for piece in result))
+        elif decode_type == DecodeType.NBEST:
+            for result in results:
+                # Just get first best result
+                result = result[0]
+                predictions.append(" ".join(word_id_to_word_str[word] for word in result.words))
         references = [s.lower() for s in references]
+        # Might want to try a different WER implementation, for sanity.
         my_wer = wer(references, predictions)
         # assert len(all_utterance_ids) == len(results)
         # for utt_id, result in zip(all_utterance_ids, results):
@@ -748,7 +835,7 @@ class TestGraphConstruction:
         #         words_and_times = nth_result[1]
         #         predictions.append((utt_id, " ".join(piece[0] for piece in words_and_times if piece[0] != "<eps>")))
         # references = [(utt_id, s.lower()) for utt_id, s in zip(all_utterance_ids, references)]
-        my_wer = wer(references, predictions)
+        # my_wer = wer(references, predictions)
         print("beam search WER:", my_wer)
         # print("greedy WER:", wer(references, all_greedy_predictions))
         return my_wer[0], predictions, references
@@ -825,6 +912,7 @@ class TestGraphConstruction:
         nbest,
         warmup_iters: int,
         benchmark_iters: int,
+        decode_type: DecodeType,
     ):
         assert warmup_iters > 0
         assert benchmark_iters > 0
@@ -881,7 +969,12 @@ class TestGraphConstruction:
                     torch.cuda.nvtx.range_pop()
                     cpu_lengths = lengths.to(torch.int64).to('cpu')
                     torch.cuda.nvtx.range_push("decoder")
-                    decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
+                    if decode_type == DecodeType.MBR:
+                        decoder.decode_mbr(log_probs.to(torch.float32), cpu_lengths)
+                    elif decode_type == DecodeType.NBEST:
+                        decoder.decode_nbest(log_probs.to(torch.float32), cpu_lengths)
+                    else:
+                        assert False, decode_type
                     torch.cuda.nvtx.range_pop()
                     torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()  # iteration

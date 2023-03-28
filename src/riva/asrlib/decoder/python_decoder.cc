@@ -33,7 +33,7 @@ using namespace nb::literals;
 namespace {
 
 void
-PybindOnlineEndpointRule(nb::module_& m)
+NanobindOnlineEndpointRule(nb::module_& m)
 {
   using PyClass = kaldi::OnlineEndpointRule;
   nb::class_<PyClass> pyclass(m, "OnlineEndpointRule");
@@ -49,7 +49,7 @@ PybindOnlineEndpointRule(nb::module_& m)
 }
 
 void
-PybindOnlineEndpointConfig(nb::module_& m)
+NanobindOnlineEndpointConfig(nb::module_& m)
 {
   using PyClass = kaldi::OnlineEndpointConfig;
   nb::class_<PyClass> pyclass(m, "OnlineEndpointConfig");
@@ -63,7 +63,7 @@ PybindOnlineEndpointConfig(nb::module_& m)
 }
 
 void
-PybindCudaDecoderConfig(nb::module_& m)
+NanobindCudaDecoderConfig(nb::module_& m)
 {
   using PyClass = kaldi::cuda_decoder::CudaDecoderConfig;
   nb::class_<PyClass> pyclass(m, "CudaDecoderConfig");
@@ -81,7 +81,7 @@ PybindCudaDecoderConfig(nb::module_& m)
 }
 
 void
-PybindDeterminizeLatticePhonePrunedOptions(nb::module_& m)
+NanobindDeterminizeLatticePhonePrunedOptions(nb::module_& m)
 {
   using PyClass = fst::DeterminizeLatticePhonePrunedOptions;
   nb::class_<PyClass> pyclass(m, "DeterminizeLatticePhonePrunedOptions");
@@ -94,7 +94,7 @@ PybindDeterminizeLatticePhonePrunedOptions(nb::module_& m)
 }
 
 void
-PybindMinimumBayesRiskOptions(nb::module_& m)
+NanobindMinimumBayesRiskOptions(nb::module_& m)
 {
   using PyClass = kaldi::MinimumBayesRiskOptions;
   nb::class_<PyClass> pyclass(m, "MinimumBayesRiskOptions");
@@ -104,7 +104,7 @@ PybindMinimumBayesRiskOptions(nb::module_& m)
 }
 
 void
-PybindWordBoundaryInfoNewOpts(nb::module_& m)
+NanobindWordBoundaryInfoNewOpts(nb::module_& m)
 {
   using PyClass = kaldi::WordBoundaryInfoNewOpts;
   nb::class_<PyClass> pyclass(m, "WordBoundaryInfoNewOpts");
@@ -115,7 +115,7 @@ PybindWordBoundaryInfoNewOpts(nb::module_& m)
 }
 
 void
-PybindLatticePostprocessorConfig(nb::module_& m)
+NanobindLatticePostprocessorConfig(nb::module_& m)
 {
   using PyClass = kaldi::cuda_decoder::LatticePostprocessorConfig;
   nb::class_<PyClass> pyclass(m, "LatticePostprocessorConfig");
@@ -133,7 +133,7 @@ PybindLatticePostprocessorConfig(nb::module_& m)
 }
 
 void
-PybindBatchedMappedOnlineDecoderCudaConfig(nb::module_& m)
+NanobindBatchedMappedOnlineDecoderCudaConfig(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedOnlineDecoderCudaConfig;
   nb::class_<PyClass> pyclass(m, "BatchedMappedOnlineDecoderCudaConfig");
@@ -152,7 +152,7 @@ PybindBatchedMappedOnlineDecoderCudaConfig(nb::module_& m)
 }
 
 void
-PybindBatchedMappedDecoderCudaConfig(nb::module_& m)
+NanobindBatchedMappedDecoderCudaConfig(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedDecoderCudaConfig;
   nb::class_<PyClass> pyclass(m, "BatchedMappedDecoderCudaConfig");
@@ -162,14 +162,27 @@ PybindBatchedMappedDecoderCudaConfig(nb::module_& m)
 }
 
 void
-PybindBatchedMappedDecoderCuda(nb::module_& m)
+NanobindNBestResult(nb::module_& m)
+{
+  using PyClass = kaldi::cuda_decoder::NBestResult;
+  nb::class_<PyClass> pyclass(m, "NBestResult");
+  pyclass.def_rw("score", &PyClass::score);
+  pyclass.def_rw("ilabels", &PyClass::ilabels);
+  pyclass.def_rw("words", &PyClass::words);
+  pyclass.def_rw("word_start_times_seconds", &PyClass::word_start_times_seconds);
+  pyclass.def_rw("word_durations_seconds", &PyClass::word_durations_seconds);
+}
+
+void
+NanobindBatchedMappedDecoderCuda(nb::module_& m)
 {
   using PyClass = riva::asrlib::BatchedMappedDecoderCuda;
   nb::class_<PyClass> pyclass(m, "BatchedMappedDecoderCuda");
   // Need to wrap fsts somehow, or make the user provide paths to them on disk.
   // Paths on disk might be a better start.
-  // ot sure how pybind11 interacts with cython or whatever openfst uses...
+  // not sure how nanobind11 interacts with cython or whatever openfst uses...
   // pywrapfst
+  // Also consider K2 here.
   // pyclass.def(nb::init<const BatchedMappedDecoderCudaConfig&,
   //                      const fst::Fst<fst::StdArc>&,
   //                      std::unique_ptr<kaldi::TransitionInformation> &&>());
@@ -247,47 +260,19 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
       });
 
   pyclass.def(
-      "decode_map",
+      "decode_nbest",
       [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths)
-          -> std::vector<
-              std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>> {
+      -> std::vector<std::vector<kaldi::cuda_decoder::NBestResult>> {
         int64_t batch_size = logits_lengths.shape(0);
         // batch, nbest result, words with times
-        std::vector<
-            std::vector<std::tuple<float, std::vector<std::tuple<std::string, float, float>>>>>
-            results(batch_size);
+        std::vector<std::vector<kaldi::cuda_decoder::NBestResult>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = logits_lengths(i);
-
-          // this may not be right... Yes, it seems quite wrong...
           const float* single_sample_logits_start = &logits(i, 0, 0);
-          // number of rows is number of frames
-          // number of cols is number of logits
-          // stride of each row is stride. Always greater than number of cols
           auto place_results =
-              [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
+              [i, &results](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
-                const std::vector<kaldi::cuda_decoder::NBestResult>& nbest_results =
-                    std::get<2>(asr_results).value();
-                // this type doesn't match results above
-                std::vector<std::tuple<
-                    float,  // score
-                    std::vector<std::tuple<std::string, float, float>>>>
-                    result_this_utt;
-                for (const kaldi::cuda_decoder::NBestResult& nbest_result : nbest_results) {
-                  std::vector<std::tuple<std::string, float, float>> words;
-                  words.reserve(nbest_result.words.size());
-                  std::size_t i = 0;
-                  for (auto&& word_id : nbest_result.words) {
-                    words.emplace_back(
-                        word_syms.Find(word_id), nbest_result.times_seconds[i].first,
-                        nbest_result.times_seconds[i].second);
-                    ++i;
-                  }
-                  result_this_utt.emplace_back(nbest_result.score, words);
-                }
-
-                results[i] = std::move(result_this_utt);
+                results[i] = std::move(std::get<2>(asr_results).value());
               };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start, logits.stride(1), valid_time_steps, place_results);
@@ -300,16 +285,17 @@ PybindBatchedMappedDecoderCuda(nb::module_& m)
 
 NB_MODULE(python_decoder, m)
 {
-  m.doc() = "pybind11 bindings for the CUDA WFST decoder";
+  m.doc() = "nanobind bindings for the CUDA WFST decoder";
 
-  PybindOnlineEndpointRule(m);
-  PybindOnlineEndpointConfig(m);
-  PybindCudaDecoderConfig(m);
-  PybindDeterminizeLatticePhonePrunedOptions(m);
-  PybindMinimumBayesRiskOptions(m);
-  PybindWordBoundaryInfoNewOpts(m);
-  PybindLatticePostprocessorConfig(m);
-  PybindBatchedMappedOnlineDecoderCudaConfig(m);
-  PybindBatchedMappedDecoderCudaConfig(m);
-  PybindBatchedMappedDecoderCuda(m);
+  NanobindOnlineEndpointRule(m);
+  NanobindOnlineEndpointConfig(m);
+  NanobindCudaDecoderConfig(m);
+  NanobindDeterminizeLatticePhonePrunedOptions(m);
+  NanobindMinimumBayesRiskOptions(m);
+  NanobindWordBoundaryInfoNewOpts(m);
+  NanobindLatticePostprocessorConfig(m);
+  NanobindBatchedMappedOnlineDecoderCudaConfig(m);
+  NanobindBatchedMappedDecoderCudaConfig(m);
+  NanobindNBestResult(m);
+  NanobindBatchedMappedDecoderCuda(m);
 }

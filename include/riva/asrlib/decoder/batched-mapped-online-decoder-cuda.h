@@ -117,7 +117,8 @@ class BatchedMappedOnlineDecoderCuda {
  public:
   using CorrelationID = uint64_t;
   using ReturnType = std::tuple<
-      std::optional<kaldi::CompactLattice>, std::optional<kaldi::cuda_decoder::CTMResult>,
+      std::optional<kaldi::CompactLattice>,
+      std::optional<kaldi::cuda_decoder::CTMResult>,
       std::optional<std::vector<kaldi::cuda_decoder::NBestResult>>>;
   using LatticeCallback = std::function<void(ReturnType&)>;
   BatchedMappedOnlineDecoderCuda(
