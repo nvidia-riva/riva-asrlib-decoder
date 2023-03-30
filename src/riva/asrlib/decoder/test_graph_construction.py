@@ -28,6 +28,7 @@ import tarfile
 import tempfile
 import time
 import unittest
+import urllib.request
 import zipfile
 from contextlib import ExitStack
 from enum import Enum
@@ -47,6 +48,10 @@ from tqdm import tqdm
 
 import riva.asrlib.decoder
 from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
+
+from nemo.collections.asr.metrics.wer import word_error_rate
+
+ERROR_MARGIN = 0.0002
 
 # os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
 
@@ -107,20 +112,8 @@ class TestGraphConstruction:
 
         lm_zip_file = os.path.join(cls.temp_dir, "speechtotext_english_lm_deployable_v1.0.zip")
         if not os.path.exists(lm_zip_file):
-            subprocess.check_call(
-                f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_lm/versions/deployable_v1.0/zip -O {lm_zip_file}",
-                shell=True,
-            )
+            urllib.request.urlretrieve("https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_lm/versions/deployable_v1.0/zip", lm_zip_file)
             with zipfile.ZipFile(lm_zip_file, 'r') as zip_ref:
-                zip_ref.extractall(cls.temp_dir)
-
-        am_zip_file = os.path.join(cls.temp_dir, "stt_en_conformer_ctc_small_1.6.0.zip")
-        if not os.path.exists(am_zip_file):
-            subprocess.check_call(
-                f"wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_conformer_ctc_small/versions/1.6.0/zip -O {am_zip_file}",
-                shell=True,
-            )
-            with zipfile.ZipFile(am_zip_file, 'r') as zip_ref:
                 zip_ref.extractall(cls.temp_dir)
 
         # Work around: At the time of writing this test, the words.txt
@@ -174,7 +167,7 @@ class TestGraphConstruction:
             cls.dataset_map[key] = Subset(dataset, sorted_indices)
 
     def test_eesen_ctc_topo(self):
-        self.create_TLG("ctc_eesen", os.path.join(self.temp_dir, "ctc_eesen"))
+        self.create_TLG("ctc_eesen", os.path.join(self.temp_dir, "ctc_eesen"), "stt_en_conformer_ctc_small")
 
     @pytest.mark.parametrize(
         "nemo_model_name, dataset, expected_wer, half_precision",
@@ -234,35 +227,37 @@ class TestGraphConstruction:
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
-        assert my_wer <= expected_wer + 0.0001
+        assert my_wer <= expected_wer + ERROR_MARGIN
 
 
+    # Note that nbest decoding tends to produce a worse WER than mbr
+    # decoding. This is expected.
     @pytest.mark.parametrize(
         "nemo_model_name, dataset, expected_wer, half_precision",
         [
-            # ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
-            # ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
-            # ("stt_en_conformer_ctc_small", "test-other", 0.07055384674168466, False),
-            # ("stt_en_conformer_ctc_small", "test-other", 0.07116519878493781, True),
-            # ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
-            # ("stt_en_conformer_ctc_small", "dev-clean", 0.034355354582552115, True),
-            # ("stt_en_conformer_ctc_small", "dev-other", 0.06969851613409751, False),
-            # ("stt_en_conformer_ctc_small", "dev-other", 0.06987516683677475, True),
-            # ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
-            # ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
-            # ("stt_en_conformer_ctc_medium", "test-other", 0.05708499703876354, False),
-            # ("stt_en_conformer_ctc_medium", "test-other", 0.05737156830903846, True),
-            # ("stt_en_conformer_ctc_medium", "dev-clean", 0.027811477519208854, False),
-            # ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
-            # ("stt_en_conformer_ctc_medium", "dev-other", 0.0547224621182382, False),
-            # ("stt_en_conformer_ctc_medium", "dev-other", 0.05462432283897307, True),
-            # ("stt_en_conformer_ctc_large", "test-clean", 0.027255782105903834, False),
-            # ("stt_en_conformer_ctc_large", "test-clean", 0.027369902617163724, True),
-            # ("stt_en_conformer_ctc_large", "test-other", 0.04529736545478861, False),
-            # ("stt_en_conformer_ctc_large", "test-other", 0.04531647020614027, True),
-            # ("stt_en_conformer_ctc_large", "dev-clean", 0.02499908091614279, False),
-            # ("stt_en_conformer_ctc_large", "dev-clean", 0.02485202749898901, True),
-            # ("stt_en_conformer_ctc_large", "dev-other", 0.0434364450027479, False),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03581482045039562, False),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03560559951308582, True),
+            ("stt_en_conformer_ctc_small", "test-other", 0.07074489425520127, False),
+            ("stt_en_conformer_ctc_small", "test-other", 0.07168102707143266, True),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.034392117936840556, False),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.03468622477114812, True),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.07054251393577765, False),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.07050325822407161, True),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.03185864272671941, False),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.03201080340839927, True),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.0573524635576868, False),
+            ("stt_en_conformer_ctc_medium", "test-other", 0.05763903482796171, True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.0280136759677953, True),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.05509539137944571, False),
+            ("stt_en_conformer_ctc_medium", "dev-other", 0.055370181361388084, True),
+            ("stt_en_conformer_ctc_large", "test-clean", 0.027255782105903834, False),
+            ("stt_en_conformer_ctc_large", "test-clean", 0.027369902617163724, True),
+            ("stt_en_conformer_ctc_large", "test-other", 0.04529736545478861, False),
+            ("stt_en_conformer_ctc_large", "test-other", 0.04531647020614027, True),
+            ("stt_en_conformer_ctc_large", "dev-clean", 0.02499908091614279, False),
+            ("stt_en_conformer_ctc_large", "dev-clean", 0.02485202749898901, True),
+            ("stt_en_conformer_ctc_large", "dev-other", 0.0437308628405433, False),
             ("stt_en_conformer_ctc_large", "dev-other", 0.04367197927298422, True),
         ],
     )
@@ -295,7 +290,7 @@ class TestGraphConstruction:
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} vanilla half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
-        assert my_wer <= expected_wer + 0.0001
+        assert my_wer <= expected_wer + ERROR_MARGIN
 
     @pytest.mark.parametrize(
         "nemo_model_name, dataset, half_precision",
@@ -411,11 +406,12 @@ class TestGraphConstruction:
             length_penalty,
             lm_scale,
             nbest,
+            DecodeType.MBR,
         )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} compact half_precision={half_precision} wer={my_wer}")
         # Accept a very tiny margin of error
-        assert my_wer <= expected_wer + 0.0001
+        assert my_wer <= expected_wer + ERROR_MARGIN
 
     @pytest.mark.parametrize(
         "nemo_model_name, dataset, half_precision",
@@ -482,19 +478,19 @@ class TestGraphConstruction:
         "nemo_model_name, dataset, expected_wer, half_precision",
         [
             ("stt_en_conformer_ctc_small", "test-clean", 0.03305690809494827, False),
-            ("stt_en_conformer_ctc_small", "test-clean", 0.03294278758368838, True),
+            ("stt_en_conformer_ctc_small", "test-clean", 0.03315200852099817, True),
             ("stt_en_conformer_ctc_small", "test-other", 0.06854784784976023, False),
             ("stt_en_conformer_ctc_small", "test-other", 0.06936935215788166, True),
             ("stt_en_conformer_ctc_small", "dev-clean", 0.03064225579941914, False),
-            ("stt_en_conformer_ctc_small", "dev-clean", 0.03058711076798647, True),
+            ("stt_en_conformer_ctc_small", "dev-clean", 0.03086283592514981, True),
             ("stt_en_conformer_ctc_small", "dev-other", 0.06746094056685248, False),
-            ("stt_en_conformer_ctc_small", "dev-other", 0.0674805684227055, True),
-            ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, False),
-            ("stt_en_conformer_ctc_medium", "test-clean", 0.02697048082775411, True),
+            ("stt_en_conformer_ctc_small", "dev-other", 0.06785349768391301, True),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.028663268411442483, False),
+            ("stt_en_conformer_ctc_medium", "test-clean", 0.02851110772976263, True),
             ("stt_en_conformer_ctc_medium", "test-other", 0.05446764610358596, False),
             ("stt_en_conformer_ctc_medium", "test-other", 0.05452496035764094, True),
-            ("stt_en_conformer_ctc_medium", "dev-clean", 0.023565310098893424, False),
-            ("stt_en_conformer_ctc_medium", "dev-clean", 0.024061615381787433, True),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.02391456196463365, False),
+            ("stt_en_conformer_ctc_medium", "dev-clean", 0.024484393956104553, True),
             ("stt_en_conformer_ctc_medium", "dev-other", 0.051640888749313024, False),
             ("stt_en_conformer_ctc_medium", "dev-other", 0.051346470911517623, True),
             ("stt_en_conformer_ctc_large", "test-clean", 0.023527845404747415, False),
@@ -531,13 +527,14 @@ class TestGraphConstruction:
             length_penalty,
             lm_scale,
             nbest,
+            DecodeType.MBR,
         )
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(
             f"GALVEZ:model={nemo_model_name} dataset={dataset} identity half_precision={half_precision} wer={my_wer}"
         )
         # Accept a very tiny margin of error
-        assert my_wer <= expected_wer + 0.0001
+        assert my_wer <= expected_wer + ERROR_MARGIN
 
     # Skip flashlight tests. They use hard-coded paths for flashlight
     # because the code to create a kenlm language model is not
@@ -573,6 +570,7 @@ class TestGraphConstruction:
             -0.5,
             0.8,
             nbest,
+            DecodeType.MBR,
         )
 
         with open(f"wfst_{dataset_name}_nbest_{nbest}.txt", "w") as fh:
@@ -590,9 +588,14 @@ class TestGraphConstruction:
         and then reallocating a new one, and deocding with that one,
         does not crash.
         """
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
         asr_model = nemo_asr.models.ASRModel.from_pretrained(
-            "stt_en_conformer_ctc_small", map_location=torch.device("cuda")
+            nemo_model_name, map_location=torch.device("cuda")
         )
+
+        self.create_TLG("ctc", work_dir, nemo_model_name)
 
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
@@ -602,8 +605,6 @@ class TestGraphConstruction:
         asr_model.encoder.freeze()
         asr_model.decoder.freeze()
         torch.cuda.cudart().cudaProfilerStart()
-
-        work_dir = os.path.join(self.temp_dir, "ctc")
 
         decoder1_config = self.create_decoder_config()
         decoder2_config = self.create_decoder_config()
@@ -804,7 +805,6 @@ class TestGraphConstruction:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_pop()
             end_time = time.time_ns()
-            print("GALVEZ: results=", [piece[0].ilabels for piece in results])
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
         print("non-warmed-up RTFx:", input_time_seconds / run_time_seconds)
@@ -815,23 +815,15 @@ class TestGraphConstruction:
                 predictions.append(" ".join(piece[0] for piece in result))
         elif decode_type == DecodeType.NBEST:
             for result in results:
-                # Just get first best result
+                # Just get first best result for WER comparison
                 result = result[0]
                 predictions.append(" ".join(word_id_to_word_str[word] for word in result.words))
         references = [s.lower() for s in references]
         # Might want to try a different WER implementation, for sanity.
         my_wer = wer(references, predictions)
-        # assert len(all_utterance_ids) == len(results)
-        # for utt_id, result in zip(all_utterance_ids, results):
-        #     # Have nbest=1
-        #     # Ugh, need to be able to output a dictionary mapping
-        #     for nth_result in result:
-        #         score = nth_result[0]
-        #         words_and_times = nth_result[1]
-        #         predictions.append((utt_id, " ".join(piece[0] for piece in words_and_times if piece[0] != "<eps>")))
-        # references = [(utt_id, s.lower()) for utt_id, s in zip(all_utterance_ids, references)]
-        # my_wer = wer(references, predictions)
+        other_wer = word_error_rate(references, predictions)
         print("beam search WER:", my_wer)
+        print("other beam search WER:", other_wer)
         # print("greedy WER:", wer(references, all_greedy_predictions))
         return my_wer[0], predictions, references
 

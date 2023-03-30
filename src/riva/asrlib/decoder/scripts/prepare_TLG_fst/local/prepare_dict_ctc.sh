@@ -30,7 +30,9 @@ sil_token="<space>"   # the character you have used to represent spaces
 . parse_options.sh || exit 1;
 . path.sh || exit 1
 
-set -e
+# We would like to set this, but a usage of cmp later can return a non-zero
+# exit code without being fatal.
+# set -e
 set -u
 set -o pipefail
 
@@ -119,13 +121,15 @@ else
     # Do not understand. Too hard to read!!!!
     (echo '<spoken_noise> [UNK]'; echo '<unk> [UNK]'; ) | cat - $lexicon | sed 's/\t/ /g' | sort | uniq > $dir/lexicon.tmp || exit 1;
     # It has a problem when the lexicon does not fully cover the units, it seems...
+    # But we cannot always guarantee that this is the case anyway...
     cut -d" " -f2- $dir/lexicon.tmp > $dir/1.txt
     cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' > $dir/2.txt
     cut -d" " -f2- $dir/lexicon.tmp | tr ' ' '\n' | sort -u > $dir/units_from_lexicon_sorted.txt
     sort $dir/units.txt > $dir/units_sorted.txt
     cmp $dir/units_sorted.txt $dir/units_from_lexicon_sorted.txt
     if [ $? -ne 0 ]; then
-        echo "ERROR: Difference in units.txt and units derived from lexicon!"
+        echo "WARNING: Difference in units.txt and units derived from lexicon!"
+        echo "This means that some units will never be output, which may be okay."
     fi
     comm -23 $dir/units_from_lexicon_sorted.txt $dir/units_sorted.txt > $dir/units_in_lexicon_only.txt
     grep -vF --file=$dir/units_in_lexicon_only.txt  $dir/lexicon.tmp > $dir/lexicon.txt
