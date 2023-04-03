@@ -230,6 +230,33 @@ class TestGraphConstruction:
         assert my_wer <= expected_wer + ERROR_MARGIN
 
 
+    def test_batch_size_1(self):
+        """
+        Integration test for https://github.com/wjakob/nanobind/pull/162
+        """
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
+        decoder_config = self.create_decoder_config()
+        decoder = BatchedMappedDecoderCuda(
+            decoder_config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank,
+        )
+
+        logits = torch.ones((1,100, num_tokens_including_blank), dtype=torch.float32).cuda()
+        lengths = torch.tensor([100], dtype=torch.int64).cpu()
+        decoder.decode_mbr(logits.detach(), lengths.detach())
+
     # Note that nbest decoding tends to produce a worse WER than mbr
     # decoding. This is expected.
     @pytest.mark.parametrize(
