@@ -4,7 +4,7 @@ requires = [
     "wheel",
     "cmake>=3.25",
     "ninja",
-    "nanobind@git+https://github.com/galv/nanobind#egg=fix-batch-size-1-type-cast",
+    "nanobind@git+https://github.com/galv/nanobind@fix-batch-size-1-type-cast",
 ]
 
 build-backend = "setuptools.build_meta"
