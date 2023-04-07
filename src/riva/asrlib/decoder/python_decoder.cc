@@ -16,12 +16,16 @@
  */
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/operators.h>
 #include <nanobind/stl/bind_vector.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
+
 #include <stdexcept>
+#include <variant>
 
 #include "riva/asrlib/decoder/batched-mapped-decoder-cuda.h"
 #include "riva/asrlib/decoder/ctc_transition_information.h"
@@ -171,6 +175,9 @@ NanobindNBestResult(nb::module_& m)
   pyclass.def_rw("words", &PyClass::words);
   pyclass.def_rw("word_start_times_seconds", &PyClass::word_start_times_seconds);
   pyclass.def_rw("word_durations_seconds", &PyClass::word_durations_seconds);
+  pyclass.def(nb::self == nb::self);
+}
+
 }
 
 void
@@ -205,6 +212,9 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
       nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
   using LogitsLengthsArray = nb::ndarray<long, nb::shape<nb::any>, nb::c_contig, nb::device::cpu>;
 
+  using SingleLogitsArray =
+      nb::ndarray<float, nb::shape<nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
+
   pyclass.def(
       "decode_write_lattice",
       [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths,
@@ -234,13 +244,35 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
 
   pyclass.def(
       "decode_mbr",
-      [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths)
+      [](PyClass& cuda_pipeline,
+         std::variant<LogitsArray, std::vector<SingleLogitsArray>>& logits,
+         LogitsLengthsArray& logits_lengths)
           -> std::vector<std::vector<std::tuple<std::string, float, float, float>>> {
         int64_t batch_size = logits_lengths.shape(0);
         std::vector<std::vector<std::tuple<std::string, float, float, float>>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = logits_lengths(i);
-          const float* single_sample_logits_start = &logits(i, 0, 0);
+
+          const float* single_sample_logits_start =
+          std::visit([i](auto&& arg) -> const float* {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, LogitsArray>) {
+                return &arg(i, 0, 0);
+              } else if constexpr (std::is_same_v<T, std::vector<SingleLogitsArray>>) {
+                return &arg[i](0,0);
+              }
+          }, logits);
+
+          const size_t frame_stride =
+          std::visit([i](auto&& arg) -> const size_t {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, LogitsArray>) {
+                return arg.stride(1);
+              } else if constexpr (std::is_same_v<T, std::vector<SingleLogitsArray>>) {
+                return arg[i].stride(0);
+              }
+           }, logits);
+
           auto place_results =
               [i, &results, &word_syms = cuda_pipeline.GetSymbolTable()](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
@@ -253,29 +285,52 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
                 }
               };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits_start, logits.stride(1), valid_time_steps, place_results);
+              single_sample_logits_start, frame_stride, valid_time_steps, place_results);
         }
         cuda_pipeline.WaitForAllTasks();
         return results;
       });
 
+
   pyclass.def(
       "decode_nbest",
-      [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths)
+      [](PyClass& cuda_pipeline,
+         std::variant<LogitsArray, std::vector<SingleLogitsArray>>& logits,
+         LogitsLengthsArray& logits_lengths)
       -> std::vector<std::vector<kaldi::cuda_decoder::NBestResult>> {
         int64_t batch_size = logits_lengths.shape(0);
         // batch, nbest result, words with times
         std::vector<std::vector<kaldi::cuda_decoder::NBestResult>> results(batch_size);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = logits_lengths(i);
-          const float* single_sample_logits_start = &logits(i, 0, 0);
+
+          const float* single_sample_logits_start =
+          std::visit([i](auto&& arg) -> const float* {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, LogitsArray>) {
+                return &arg(i, 0, 0);
+              } else if constexpr (std::is_same_v<T, std::vector<SingleLogitsArray>>) {
+                return &arg[i](0,0);
+              }
+          }, logits);
+
+          const size_t frame_stride =
+          std::visit([i](auto&& arg) -> const size_t {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, LogitsArray>) {
+                return arg.stride(1);
+              } else if constexpr (std::is_same_v<T, std::vector<SingleLogitsArray>>) {
+                return arg[i].stride(0);
+              }
+           }, logits);
+
           auto place_results =
               [i, &results](
                   riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
                 results[i] = std::move(std::get<2>(asr_results).value());
               };
           cuda_pipeline.DecodeWithCallback(
-              single_sample_logits_start, logits.stride(1), valid_time_steps, place_results);
+              single_sample_logits_start, frame_stride, valid_time_steps, place_results);
         }
         cuda_pipeline.WaitForAllTasks();
         return results;

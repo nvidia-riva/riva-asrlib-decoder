@@ -1000,6 +1000,77 @@ class TestGraphConstruction:
         torch.cuda.cudart().cudaProfilerStop()
 
 
+    def test_pad_vs_tensor_list(self):
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+        torch.cuda.cudart().cudaProfilerStart()
+
+        decoder_config = self.create_decoder_config()
+
+        data_loader = torch.utils.data.DataLoader(
+            self.dataset_map["test-clean"],
+            batch_size=decoder_config.online_opts.max_batch_size,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            for batch in data_loader:
+                input_signal, input_signal_length, target, utterance_ids = batch
+                input_signal = input_signal.cuda()
+                input_signal_length = input_signal_length.cuda()
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
+                cpu_lengths = lengths.to(torch.int64).to('cpu')
+
+                decoder = BatchedMappedDecoderCuda(
+                    decoder_config,
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+                    os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+                    num_tokens_including_blank,
+                )
+
+                log_probs = log_probs.to(torch.float32)
+                pad_results = decoder.decode_mbr(log_probs, cpu_lengths)
+
+                log_probs_list = []
+                for i, length in enumerate(cpu_lengths):
+                    log_probs_list.append(log_probs[i, :length, :])
+                list_results = decoder.decode_mbr(log_probs_list, cpu_lengths)
+                assert pad_results == list_results
+
+
+                pad_results_nbest = decoder.decode_nbest(log_probs, cpu_lengths)
+                list_results_nbest = decoder.decode_nbest(log_probs_list, cpu_lengths)
+                print("GALVEZ:", pad_results_nbest)
+                print("GALVEZ:", list_results_nbest)
+                assert pad_results_nbest == list_results_nbest
+                # break
+
+        torch.cuda.cudart().cudaProfilerStop()
+        # data_loader = torch.utils.data.DataLoader(
+        #     self.dataset_map["test-clean"],
+        #     batch_size=decoder1_config.online_opts.max_batch_size,
+        #     collate_fn=collate_fn,
+        #     pin_memory=True,
+        # )
+
 def write_ctm_output(key, result):
     for word, start, end in result:
         print(f"{key} 1 {start:.2f} {end - start:.2f} {word} 1.0")
