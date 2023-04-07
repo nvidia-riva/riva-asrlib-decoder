@@ -60,7 +60,9 @@ class BatchedMappedDecoderCuda {
  private:
   BatchedMappedOnlineDecoderCuda cuda_online_pipeline_;
   std::atomic<bool> threads_running_;
-  std::atomic<int> n_tasks_not_done_;
+  std::mutex n_tasks_not_done_m_;
+  std::condition_variable n_tasks_not_done_cv_;
+  int n_tasks_not_done_;
   std::thread online_pipeline_control_thread_;
   struct UtteranceTask;  // Forward declaration
   std::atomic<CorrelationID> corr_id_cnt_;

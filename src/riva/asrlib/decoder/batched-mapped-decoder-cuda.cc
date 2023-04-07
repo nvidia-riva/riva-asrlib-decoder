@@ -18,7 +18,6 @@
 
 namespace riva::asrlib {
 
-const float kSleepForTaskComplete = 10e-3;
 const float kSleepForNewTask = 100e-6;
 
 BatchedMappedDecoderCuda::BatchedMappedDecoderCuda(
@@ -52,7 +51,10 @@ BatchedMappedDecoderCuda::DecodeWithCallback(
   task.d_logits = d_logits;
   task.logits_frame_stride = logits_frame_stride;
   task.logits_n_input_frames_valid = logits_n_input_frames_valid;
-  n_tasks_not_done_.fetch_add(1);
+  {
+    std::lock_guard<std::mutex> lk(n_tasks_not_done_m_);
+    n_tasks_not_done_ += 1;
+  }
   // TODO
   {
     std::lock_guard<std::mutex> lk(outstanding_utt_m_);
@@ -82,7 +84,13 @@ BatchedMappedDecoderCuda::AcquireTasks()
         task.corr_id, [this, callback](BatchedMappedOnlineDecoderCuda::ReturnType& result) {
           if (callback)
             callback(result);
-          n_tasks_not_done_.fetch_sub(1, std::memory_order_release);
+          {
+            std::lock_guard<std::mutex> lk(n_tasks_not_done_m_);
+            n_tasks_not_done_ -= 1;
+            if (n_tasks_not_done_ == 0) {
+              n_tasks_not_done_cv_.notify_one();
+            }
+          }
         });
     current_tasks_.push_back(std::move(task));
     outstanding_utt_q_.pop();
@@ -171,10 +179,11 @@ void
 BatchedMappedDecoderCuda::WaitForAllTasks()
 {
   // I feel like we should have a condition variable of some sort here...
-  while (n_tasks_not_done_.load() != 0) {
-    // why not just call join on the one thread?
-    kaldi::Sleep(kSleepForTaskComplete);
-  }
+
+  std::unique_lock<std::mutex> lk(n_tasks_not_done_m_);
+  n_tasks_not_done_cv_.wait(lk, [this]{
+      return n_tasks_not_done_ == 0;}
+  );
 }
 
 const fst::SymbolTable&
