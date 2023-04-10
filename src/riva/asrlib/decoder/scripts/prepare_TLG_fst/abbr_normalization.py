@@ -19,7 +19,9 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: abbr_normalization.py <path_to_abbr_mapping file> <path to the grammar file>")
 
-    abbr_mapfile = sys.argv[1]  # this should be a tsv of format <abbreviation>\t<spoken_expansion>
+    # this should be a tsv of format <abbreviation>\t<spoken_expansion>
+    # this will also be used in ITN to denorm the output
+    abbr_mapfile = sys.argv[1]
 
     grammar_file = sys.argv[2]  # this is the file containing list of entities with abbreviations to be expanded
     abbr_map(abbr_mapfile, grammar_file)
