@@ -1,20 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import pywrapfst as fst
-
 
 
 import sys
@@ -31,7 +15,7 @@ def get_word_id(isym, word):
 def create_tag_fst(isym, tag_filename):
     with open(tag_filename,'r') as tfile:
         tag_fst = fst.VectorFst()
-        entity_name = f'{tag_file.split("/")[-1].split(".")[0]}'
+        entity_name = f'{tag_filename.split("/")[-1].split(".")[0]}'
         tag_name = f"#entity:{entity_name}"
 
         tag_name_id = isym.find(tag_name)
@@ -41,8 +25,6 @@ def create_tag_fst(isym, tag_filename):
 
         eps=0  # Check words.txt if this is different
         default_weight=fst.Weight(tag_fst.weight_type(),-0.01)
-        default_weight=fst.Weight.zero(tag_fst.weight_type())
-        final_weight=fst.Weight.one(tag_fst.weight_type())
         tag_state=tag_fst.add_state()
         tag_fst.set_start(tag_state)
         # Skip adding the start state #entity:<entity_name> since this is handled by fstreplace
@@ -74,7 +56,7 @@ def create_tag_fst(isym, tag_filename):
 
         tag_final_state=tag_fst.add_state()
         tag_fst.add_arc(phrase_end_state, fst.Arc(tag_name_id, eps, default_weight, tag_final_state))
-        tag_fst.set_final(tag_final_state, final_weight)
+        tag_fst.set_final(tag_final_state, default_weight)
     #tag_fst.write("/tmp/tag_nomin.fst")
     tag_fst.rmepsilon()
     #tag_fst.write("/tmp/tag_noeps.fst")
@@ -82,7 +64,7 @@ def create_tag_fst(isym, tag_filename):
     tag_fst.minimize()
    # tag_fst.write("/tmp/tag.fst")
 
-    return tag_fst
+    return tag_name_id, tag_fst
 
 
 
@@ -93,6 +75,13 @@ def get_new_grammar(tag_name_id:int, tag_fst:fst.VectorFst, g_fst:fst.VectorFst)
     new_g_fst.rmepsilon().minimize()
     return new_g_fst
 
+def expand_grammar(isym,g_fst,tag_file):
+    print("Creating tag.fst")
+    tag_name_id, tag_fst = create_tag_fst(isym, tag_file)
+    print(tag_name_id)
+    print("Inserting in G.fst")
+    new_g_fst=get_new_grammar(tag_name_id,tag_fst,g_fst)
+    return new_g_fst
 
 
 if __name__=="__main__":
@@ -101,13 +90,10 @@ if __name__=="__main__":
     symbol_table_file=sys.argv[1]
     g_fst=fst.VectorFst().read(sys.argv[3])
     tag_file=sys.argv[2]
-    entity_name=f'{tag_file.split("/")[-1].split(".")[0]}'
-    tag_name = f"#entity:{entity_name}"
 
     isym=fst.SymbolTable.read_text(symbol_table_file)
-    tag_name_id=isym.find(tag_name)
 
-    tag_fst=create_tag_fst(isym, tag_file)
+    tag_name_id, tag_fst=create_tag_fst(isym, tag_file)
     new_g_fst=get_new_grammar(tag_name_id,tag_fst,g_fst)
     out_filename=sys.argv[3].replace('.fst', '_new.fst')
     new_g_fst.write(out_filename)
