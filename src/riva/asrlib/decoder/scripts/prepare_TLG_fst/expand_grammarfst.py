@@ -24,6 +24,7 @@ def create_tag_fst(isym, tag_filename):
             exit(1)
 
         eps=0  # Check words.txt if this is different
+        #Need to have a better way to add weights (sub-language modeling?)
         default_weight=fst.Weight(tag_fst.weight_type(),-0.01)
         tag_state=tag_fst.add_state()
         tag_fst.set_start(tag_state)
