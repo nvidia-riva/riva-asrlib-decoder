@@ -27,6 +27,8 @@ topo_with_sefloops=true     # Whether to build the topology with token self-loop
 blank_first=false           # Whether to put '<blk>' at the beginning in token list or at the end.
 use_space=false             # Whether to use optional silence
 space_char="<SPACE>"        # The character you have used to represent spaces
+extra_word_disamb=          # Path to additional word disambiguation symbols (sorted).
+
 
 . parse_options.sh
 
@@ -45,6 +47,7 @@ if [ $# -ne 3 ]; then
   echo "     --space-char <space character>                  # default: <SPACE>, the character to represent spaces."
   echo "     --topo <topology type>                          # default: ctc, Choices: ctc, ctc_eesen, ctc_compact, identity."
   echo "     --topo-with-sefloops <true or false>            # default: true."
+  echo "     --extra_word_disamb <filename>                  # default: ''"
   exit 1;
 fi
 
@@ -80,6 +83,9 @@ ndisambig=`add_lex_disambig.pl $tmpdir/lexiconp.txt $tmpdir/lexiconp_disambig.tx
 ndisambig=$[$ndisambig+1];
 
 ( for n in `seq 0 $ndisambig`; do echo '#'$n; done ) > $tmpdir/disambig.list
+if [ ! -z ${extra_word_disamb} ]; then
+  cat $extra_word_disamb >> $tmpdir/disambig.list
+fi
 cp -rf $tmpdir/disambig.list $dir/phones/disambig.txt
 
 # Get the full list of CTC tokens used in FST. These tokens include <eps>, the blank <blk>, the actual labels (e.g.,
@@ -128,9 +134,21 @@ cat $tmpdir/lexiconp.txt | awk '{print $1}' | sort | uniq | awk '
     printf("</s> %d\n", NR+3);
   }' > $dir/words.txt || exit 1;
 
+if [ ! -z ${extra_word_disamb} ]; then
+  add_word_disambig.py --word_symbols=$dir/words.txt --extra_word_disamb=$extra_word_disamb `cat $dir/words.txt |tail -n1|cut -d " " -f 2`
+fi
+
 cat $dir/phones/align_lexicon.txt | sym2int.pl -f 3- $dir/tokens.txt | \
   sym2int.pl -f 1-2 $dir/words.txt > $dir/phones/align_lexicon.int
 
+# Create the disambiguation files for tokens and words
+grep \#0 $dir/tokens.txt | awk '{print $2}' > $dir/phones/wdisambig_tokens.int
+grep \#0 $dir/words.txt | awk '{print $2}' > $dir/phones/wdisambig_words.int
+
+if [ ! -z ${extra_word_disamb} ]; then
+  grep \#entity $dir/tokens.txt | awk '{print $2}' >> $dir/phones/wdisambig_tokens.int
+  grep \#entity $dir/words.txt | awk '{print $2}' >> $dir/phones/wdisambig_words.int
+fi
 # Now compile the lexicon FST. Depending on the size of your lexicon, it may take some time.
 token_disambig_symbol=`grep \#0 $dir/tokens.txt | awk '{print $2}'`
 word_disambig_symbol=`grep \#0 $dir/words.txt | awk '{print $2}'`
@@ -144,7 +162,7 @@ fi
 make_lexicon_fst.pl --pron-probs $tmpdir/lexiconp_disambig.txt $silprob "$space_char" '#'$ndisambig | \
   fstcompile --isymbols=$dir/tokens.txt --osymbols=$dir/words.txt \
   --keep_isymbols=false --keep_osymbols=false |   \
-  fstaddselfloops  "echo $token_disambig_symbol |" "echo $word_disambig_symbol |" | \
+  fstaddselfloops  $dir/phones/wdisambig_tokens.int $dir/phones/wdisambig_words.int | \
   fstarcsort --sort_type=olabel > $dir/L_disambig.fst || exit 1;
 
 echo "Dict and token FSTs compiling succeeded"
