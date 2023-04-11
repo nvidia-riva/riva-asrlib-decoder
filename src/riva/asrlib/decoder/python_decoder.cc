@@ -178,8 +178,6 @@ NanobindNBestResult(nb::module_& m)
   pyclass.def(nb::self == nb::self);
 }
 
-}
-
 void
 NanobindBatchedMappedDecoderCuda(nb::module_& m)
 {
