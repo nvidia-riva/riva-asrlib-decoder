@@ -30,7 +30,6 @@ def generate_output(asr_model_name, graph_path, input_folder, results_file):
             restore_path=asr_model_name
         ).to(torch.device(device))
 
-        #decoder = build_ctcdecoder(asr_model.decoder.vocabulary)
         config = BatchedMappedDecoderCudaConfig()
         config.n_input_per_chunk = 50
         config.online_opts.decoder_opts.default_beam = 17.0
