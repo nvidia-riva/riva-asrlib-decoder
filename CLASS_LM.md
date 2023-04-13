@@ -77,6 +77,16 @@ word class labels (`#entity:<class>`), and the files (filenames `<class>.txt`)
 containing the list of entities for the class. The list of entities  is not 
 restricted to words and could be phrases
 
+For example, in the above example `cities.txt` would contain at the very least the 
+following
+```shell
+$> cat cities.txt
+london
+new york
+paris
+seattle
+```
+
 ## Process to create the `TLG.fst` supporting word classes
 
 (all the below scripts are available in `src/riva/decoder/scripts/prepare_TLG_fst` path)
