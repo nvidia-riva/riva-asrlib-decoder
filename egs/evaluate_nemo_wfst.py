@@ -42,7 +42,8 @@ def generate_output(asr_model_name, graph_path, input_folder, results_file):
         config.online_opts.frame_shift_seconds = 0.03
         config.online_opts.num_post_processing_worker_threads = max(multiprocessing.cpu_count()-4,4)
         config.online_opts.num_decoder_copy_threads = 4
-        num_tokens_including_blank=129
+        num_tokens_including_blank=len(asr_model.tokenizer.vocab)+2 # add 2 tokens: <eps> and #<blk> to num_tokens
+
         decoder = BatchedMappedDecoderCuda(
             config, str(f"{graph_path}/TLG.fst"),
             str(f"{graph_path}/words.txt"), num_tokens_including_blank
