@@ -103,7 +103,7 @@ classes (to be used asdisambiguation symbols)
 * Generate the FSTs, `T.fst`, `L.fst` and `G.fst`, extend and compose to 
 form `TLG.fst`
 
-`mkgraph_ctc_classlm.sh --units <units_txt_path> --extra_word_disamb <classlabels_path> <lexicon_path:output>  <path_to_arpa_file> <lang_folder_path:output>`
+`mkgraph_ctc_classlm.sh --units <units_txt_path> --extra_word_disamb <classlabels_path> <lexicon_path>  <path_to_arpa_file> <lang_folder_path:output>`
 
 When run successfully, the above command will generate a graph folder in
 `<lang_folder_path>` with the name `graph_CTC_<lm_name>` which contains
