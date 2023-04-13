@@ -80,7 +80,7 @@ restricted to words and could be phrases
 For example, in the above example `cities.txt` would contain at the very least the 
 following
 ```shell
-$> cat cities.txt
+$> cat city.txt
 london
 new york
 paris
