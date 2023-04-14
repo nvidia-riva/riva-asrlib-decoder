@@ -40,7 +40,9 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   BatchedMappedOnlineDecoderCudaConfig()
       : max_batch_size(400), num_channels(800), num_post_processing_worker_threads(-1),
         determinize_lattice(true), num_decoder_copy_threads(2),
-        frame_shift_seconds(std::numeric_limits<float>::max()), use_lattice_postprocessor(true)
+        frame_shift_seconds(std::numeric_limits<float>::max()),
+        use_lattice_postprocessor(true),
+        use_final_probs(true)
   {
   }
   void Register(kaldi::OptionsItf* po)
@@ -71,6 +73,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
         "The sampling period of log-likelihood vectors output by the "
         "acoustic model.");
     po->Register("use-lattice-postprocessor", &use_lattice_postprocessor, "");
+    po->Register("use-final-probs", &use_final_probs, "Use final state probabilities when getting the lattice. True by default. This is good for making sure that the final word is 'forced out'.");
 
     decoder_opts.Register(po);
     det_opts.Register(po);
@@ -84,6 +87,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
   int num_decoder_copy_threads;
   float frame_shift_seconds{0.0f};
   bool use_lattice_postprocessor;
+  bool use_final_probs;
 
   kaldi::cuda_decoder::CudaDecoderConfig decoder_opts;
   // can't necessarily determinize in this way... Actually, yes, we
@@ -125,7 +129,6 @@ class BatchedMappedOnlineDecoderCuda {
       const BatchedMappedOnlineDecoderCudaConfig& config, const fst::Fst<fst::StdArc>& decode_fst,
       std::unique_ptr<kaldi::TransitionInformation>&& trans_information)
       : config_(config), trans_information_(std::move(trans_information)),
-        partial_hypotheses_(nullptr), end_points_(nullptr),
         cuda_fst_(
             std::make_unique<kaldi::cuda_decoder::CudaFst>(decode_fst, trans_information_.get())),
         // cuda_decoder_(std::make_unique<kaldi::cuda_decoder::CudaDecoder>(
@@ -179,23 +182,29 @@ class BatchedMappedOnlineDecoderCuda {
     assert(available_channels_.empty() || available_channels_.size() == config_.num_channels);
   }
 
+  void AllowPartialHypotheses() {
+    cuda_decoder_->AllowPartialHypotheses();
+  }
+
   void WaitForLatticeCallbacks() noexcept
   {
     while (n_lattice_callbacks_not_done_.load() != 0) kaldi::Sleep(kSleepForCallBack);
   }
   void DecodeBatch(
-      const std::vector<CorrelationID>& corr_ids, const std::vector<const float*>& d_logits,
+      const std::vector<CorrelationID>& corr_ids,
+      const std::vector<const float*>& d_logits,
       const std::vector<std::size_t>& logits_frame_stride,
-      const std::vector<std::size_t>& n_logit_frames_valid, const std::vector<bool>& is_first_chunk,
-      // doesn't is_last_chunk depend upon the minimum
-      // value in n_logit_frames_valid?
-      const std::vector<bool>& is_last_chunk, std::vector<int>* channels)
+      const std::vector<std::size_t>& n_logit_frames_valid,
+      const std::vector<bool>& is_first_chunk,
+      const std::vector<bool>& is_last_chunk,
+      std::vector<int>* channels,
+      std::vector<kaldi::cuda_decoder::PartialHypothesisEx>* partial_hypotheses = nullptr)
   {
     nvtxRangePushA("DecodeBatch");
-    if (channels != nullptr) {
-      channels = &channels_;
-    }
     ListIChannelsInBatch(corr_ids, &channels_);
+    if (channels != nullptr) {
+      *channels = channels_;
+    }
 
     std::vector<int> list_channels_first_chunk;
     for (std::size_t i = 0; i < is_first_chunk.size(); ++i) {
@@ -208,6 +217,7 @@ class BatchedMappedOnlineDecoderCuda {
       cuda_decoder_->InitDecoding(list_channels_first_chunk);
     }
 
+    nvtxRangePush("AdvanceDecoding");
     std::vector<std::pair<kaldi::cuda_decoder::ChannelId, const float*>> lanes_assignments;
     lanes_assignments.reserve(channels_.size());
     std::size_t frames_to_decode =
@@ -223,8 +233,27 @@ class BatchedMappedOnlineDecoderCuda {
       }
       cuda_decoder_->AdvanceDecoding(lanes_assignments);
     }
-
+    nvtxRangePop();
+    // when does "waiting" occur, if ever? Answer: It occurs when we
+    // call GetPartialHypothesis(). Which makes sense. We need to move
+    // those results to CPU anyway.
+    nvtxRangePush("RunCallbacksAndFinalize");
     RunCallbacksAndFinalize(corr_ids, channels_, is_last_chunk);
+    nvtxRangePop();
+
+    // Why don't I just require the client to call these methods instead?
+    // partial hypothesis is a string, which is troublesome for
+    // Would prefer std::optional instead...
+    if (partial_hypotheses != nullptr) {
+      for (size_t i = 0; i < channels_.size(); ++i) {
+        kaldi::cuda_decoder::ChannelId ichannel = channels_[i];
+        partial_hypotheses->push_back(cuda_decoder_->GetPartialHypothesisEx(ichannel));
+      }
+    }
+
+    // if (end_points) {
+    // }
+    
     nvtxRangePop();
   }
 
@@ -273,15 +302,11 @@ class BatchedMappedOnlineDecoderCuda {
       }
     }
 
-    // KALDI_LOG << "GALVEZ:RunCallbacksAndFinalize=" << list_channels_last_chunk.size();
-
     if (list_channels_last_chunk.empty()) {
       return;
     }
 
-    // this must finish before ConcurrentGetRawLatticeSingleChannel is called
-    // but it clearly does?
-    cuda_decoder_->PrepareForGetRawLattice(list_channels_last_chunk, true);
+    cuda_decoder_->PrepareForGetRawLattice(list_channels_last_chunk, config_.use_final_probs);
     n_lattice_callbacks_not_done_.fetch_add(
         list_channels_last_chunk.size(), std::memory_order_acquire);
 
@@ -295,7 +320,7 @@ class BatchedMappedOnlineDecoderCuda {
 
   bool TryInitCorrID(CorrelationID corr_id, std::int32_t wait_for_us = 0)
   {
-    // KALDI_LOG << "GALVEZ:TryInitCorrID";
+    // Precodnition corr_id must be unique
     bool inserted;
     decltype(corr_id2channel_.end()) it;
     std::tie(it, inserted) = corr_id2channel_.insert({corr_id, -1});
@@ -417,10 +442,6 @@ class BatchedMappedOnlineDecoderCuda {
 
   // corr_id -> decoder channel map
   std::unordered_map<CorrelationID, int32> corr_id2channel_;
-
-  // Where to store partial_hypotheses_ and end_points_ if available
-  std::vector<const std::string*>* partial_hypotheses_;
-  std::vector<bool>* end_points_;
 
   // The callback is called once the final lattice is ready
   std::unordered_map<CorrelationID, const LatticeCallback> lattice_callbacks_;
