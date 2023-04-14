@@ -153,6 +153,7 @@ NanobindBatchedMappedOnlineDecoderCudaConfig(nb::module_& m)
   pyclass.def_rw("det_opts", &PyClass::det_opts);
   pyclass.def_rw("lattice_postprocessor_opts", &PyClass::lattice_postprocessor_opts);
   pyclass.def_rw("use_lattice_postprocessor", &PyClass::use_lattice_postprocessor);
+  pyclass.def_rw("use_final_probs", &PyClass::use_final_probs);
 }
 
 void
@@ -174,8 +175,86 @@ NanobindNBestResult(nb::module_& m)
   pyclass.def_rw("ilabels", &PyClass::ilabels);
   pyclass.def_rw("words", &PyClass::words);
   pyclass.def_rw("word_start_times_seconds", &PyClass::word_start_times_seconds);
+  // TODO: Stick with either end times or durations for everything. Be consistent
   pyclass.def_rw("word_durations_seconds", &PyClass::word_durations_seconds);
   pyclass.def(nb::self == nb::self);
+}
+
+void
+NanobindPartialHypothesisEx(nb::module_& m)
+{
+  using PyClass = kaldi::cuda_decoder::PartialHypothesisEx;
+  nb::class_<PyClass> pyclass(m, "PartialHypothesisEx");
+  pyclass.def_rw("score", &PyClass::score);
+  pyclass.def_rw("ilabels", &PyClass::ilabels);
+  pyclass.def_rw("words", &PyClass::words);
+  pyclass.def_rw("word_start_times_frames", &PyClass::word_start_times_frames);
+  pyclass.def_rw("word_end_times_frames", &PyClass::word_end_times_frames);
+}
+
+using LogitsArray =
+  nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
+using LogitsLengthsArray = nb::ndarray<long, nb::shape<nb::any>, nb::c_contig, nb::device::cpu>;
+
+using SingleLogitsArray =
+  nb::ndarray<float, nb::shape<nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
+
+void NanobindBatchedMappedOnlineDecoderCuda(nb::module_& m)
+{
+  using PyClass = riva::asrlib::BatchedMappedOnlineDecoderCuda;
+  nb::class_<PyClass> pyclass(m, "BatchedMappedOnlineDecoderCuda");
+
+  pyclass.def("__init__", [](PyClass* decoder,
+                             const riva::asrlib::BatchedMappedOnlineDecoderCudaConfig& config,
+                             const std::string& wfst_path_on_disk,
+                             const std::string& symbol_table_path_on_disk,
+                             int num_tokens_including_blank) {
+        std::unique_ptr<kaldi::TransitionInformation> trans_info =
+            std::make_unique<riva::asrlib::CTCTransitionInformation>(num_tokens_including_blank);
+        std::unique_ptr<fst::Fst<fst::StdArc>> decode_fst =
+            std::unique_ptr<fst::Fst<fst::StdArc>>(fst::ReadFstKaldiGeneric(wfst_path_on_disk));
+
+        auto word_syms = std::unique_ptr<fst::SymbolTable>(
+            fst::SymbolTable::ReadText(symbol_table_path_on_disk));
+
+        new (decoder) PyClass(config, *decode_fst, std::move(trans_info));
+        decoder->SetSymbolTable(*word_syms);
+        decoder->AllowPartialHypotheses();
+                          });
+  // how do I decode just a little bit at a time, and then get the final lattice when desired?
+  pyclass.def("try_init_corr_id", &PyClass::TryInitCorrID, "corr_id"_a, "wait_for_us"_a = 0);
+  pyclass.def("set_lattice_callback", &PyClass::SetLatticeCallback);
+
+  pyclass.def("decode_batch",
+              [](PyClass *self,
+                 const std::vector<riva::asrlib::BatchedMappedOnlineDecoderCuda::CorrelationID>& corr_ids,
+                 std::vector<SingleLogitsArray>& logits_t,
+                 const std::vector<bool>& is_first_chunk,
+                 const std::vector<bool>& is_last_chunk) ->
+              std::tuple<std::vector<int>, std::vector<kaldi::cuda_decoder::PartialHypothesisEx>> {
+                std::vector<int> channels;
+                std::vector<kaldi::cuda_decoder::PartialHypothesisEx> partial_hypotheses;
+
+                size_t batch_size = logits_t.size();
+
+                std::vector<const float*> d_logits(batch_size);
+                std::vector<size_t> logits_frame_stride(batch_size);
+                std::vector<size_t> n_logit_frames_valid(batch_size);
+                for (std::size_t i = 0; i < batch_size; ++i) {
+                  d_logits[i] = &logits_t[i](0, 0);
+                  logits_frame_stride[i] = logits_t[i].stride(0);
+                  n_logit_frames_valid[i] = logits_t[i].shape(0);
+                }
+
+                self->DecodeBatch(corr_ids, d_logits, logits_frame_stride,
+                                  n_logit_frames_valid, is_first_chunk,
+                                  is_last_chunk, &channels, &partial_hypotheses);
+                // std::vector channels_copy(*channels);
+                return std::make_tuple(channels, partial_hypotheses);
+              });
+
+
+  pyclass.def("wait_for_lattice_callback", &PyClass::WaitForLatticeCallbacks);
 }
 
 void
@@ -205,13 +284,6 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
 
         new (decoder) PyClass(config, *decode_fst, std::move(trans_info), *word_syms);
       });
-
-  using LogitsArray =
-      nb::ndarray<float, nb::shape<nb::any, nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
-  using LogitsLengthsArray = nb::ndarray<long, nb::shape<nb::any>, nb::c_contig, nb::device::cpu>;
-
-  using SingleLogitsArray =
-      nb::ndarray<float, nb::shape<nb::any, nb::any>, nb::c_contig, nb::device::cuda>;
 
   pyclass.def(
       "decode_write_lattice",
@@ -350,5 +422,7 @@ NB_MODULE(python_decoder, m)
   NanobindBatchedMappedOnlineDecoderCudaConfig(m);
   NanobindBatchedMappedDecoderCudaConfig(m);
   NanobindNBestResult(m);
+  NanobindPartialHypothesisEx(m);
+  NanobindBatchedMappedOnlineDecoderCuda(m);
   NanobindBatchedMappedDecoderCuda(m);
 }
