@@ -47,7 +47,7 @@ from torch.utils.data import Dataset, Subset
 from tqdm import tqdm
 
 import riva.asrlib.decoder
-from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedDecoderCudaConfig
+from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, BatchedMappedOnlineDecoderCuda, BatchedMappedDecoderCudaConfig
 
 from nemo.collections.asr.metrics.wer import word_error_rate
 
@@ -1070,6 +1070,312 @@ class TestGraphConstruction:
         #     collate_fn=collate_fn,
         #     pin_memory=True,
         # )
+
+
+    @pytest.mark.xfail
+    def test_online_start_stop_decoder(self):
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
+        offline_config = self.create_decoder_config()
+        offline_config.online_opts.max_batch_size = 16
+        config = offline_config.online_opts
+
+
+        decoder = BatchedMappedOnlineDecoderCuda(
+            config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank,
+        )
+
+        data_loader = torch.utils.data.DataLoader(
+            self.dataset_map["test-clean"],
+            batch_size=config.max_batch_size,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        half_precision = True
+        acoustic_scale = 2.2
+
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        word_id_to_word_str = load_word_symbols(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"))
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+            for batch in data_loader:
+                input_signal, input_signal_length, target, utterance_ids = batch
+                input_signal = input_signal.cuda()
+                input_signal_length = input_signal_length.cuda()
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
+                log_probs *= acoustic_scale
+
+                cpu_lengths = lengths.to(torch.int64).to('cpu').tolist()
+
+                batch_size = log_probs.shape[0]
+                corr_ids = list(range(batch_size))
+                for corr_id in corr_ids:
+                    success = decoder.try_init_corr_id(corr_id)
+                    # Do SetLatticeCallback() here if you want
+                    # Is there some way that I can get the lattice other than callbacks?
+                    assert success
+                log_probs_list = [0] * batch_size
+                is_first_chunk = [0] * batch_size
+                is_last_chunk = [0] * batch_size
+                for i in range(batch_size):
+                    log_probs_list[i] = log_probs[i, :cpu_lengths[i], :]
+                    is_first_chunk[i] = True
+                    is_last_chunk[i]  = True
+                channels, full_partial_hypotheses = \
+                    decoder.decode_batch(corr_ids, log_probs_list,
+                                         is_first_chunk, is_last_chunk)
+
+                
+                for corr_id in corr_ids:
+                    success = decoder.try_init_corr_id(corr_id)
+                    # Do SetLatticeCallback() here if you want
+                    # Is there some way that I can get the lattice other than callbacks?
+                    assert success
+                log_probs_list = [0] * batch_size
+                is_first_chunk = [0] * batch_size
+                is_last_chunk = [0] * batch_size
+                for i in range(batch_size):
+                    log_probs_list[i] = log_probs[i, :cpu_lengths[i] // 2, :]
+                    is_first_chunk[i] = True
+                    is_last_chunk[i]  = False
+                channels, chunked_partial_hypotheses1 = \
+                    decoder.decode_batch(corr_ids, log_probs_list,
+                                         is_first_chunk, is_last_chunk)
+                for i in range(batch_size):
+                    log_probs_list[i] = log_probs[i, cpu_lengths[i] // 2:, :]
+                    is_first_chunk[i] = False
+                    is_last_chunk[i]  = True
+                channels, chunked_partial_hypotheses2 = \
+                    decoder.decode_batch(corr_ids, log_probs_list,
+                                         is_first_chunk, is_last_chunk)
+
+                for ph, ph2 in zip(full_partial_hypotheses, chunked_partial_hypotheses2):
+                    print("full:", ph.score, " chunked:", ph2.score)
+                    print("Full:", " ".join(word_id_to_word_str[word] for word in ph.words))
+                    print("Chunked:", " ".join(word_id_to_word_str[word] for word in ph2.words))
+                    if abs(ph.score - ph2.score) > 0.1:
+                        print("Different scores")
+                    # this assertion fails sometimes
+                    assert abs(ph.score - ph2.score) <= 0.1
+                    assert ph.words == ph2.words
+
+    def test_online_decoder(self):
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
+        offline_config = self.create_decoder_config()
+        offline_config.online_opts.max_batch_size = 16
+        config = offline_config.online_opts
+
+
+        decoder = BatchedMappedOnlineDecoderCuda(
+            config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank,
+        )
+
+        offline_decoder = BatchedMappedDecoderCuda(
+            offline_config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank,
+        )
+
+        # TODO: Need to test case where we try to input a larger batch
+        # size than config.max_batch_size
+        data_loader = torch.utils.data.DataLoader(
+            self.dataset_map["test-clean"],
+            batch_size=config.max_batch_size,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        half_precision = True
+        acoustic_scale = 2.2
+
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        word_id_to_word_str = load_word_symbols(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"))
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+            for batch in data_loader:
+                input_signal, input_signal_length, target, utterance_ids = batch
+                input_signal = input_signal.cuda()
+                input_signal_length = input_signal_length.cuda()
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
+                log_probs *= acoustic_scale
+
+                cpu_lengths = lengths.to(torch.int64).to('cpu').tolist()
+
+                batch_size = log_probs.shape[0]
+                # batch_size = 1
+                # TODO: Remove this!
+                cpu_lengths = cpu_lengths[:batch_size]
+                corr_ids = list(range(batch_size))
+                for corr_id in corr_ids:
+                    success = decoder.try_init_corr_id(corr_id)
+                    # Do SetLatticeCallback() here if you want
+                    # Is there some way that I can get the lattice other than callbacks?
+                    assert success
+                # Are my results going to be contiguous in general?
+                # log_probs_ptrs = [0] * batch_size
+                log_probs_list = [0] * batch_size
+                is_first_chunk = [0] * batch_size
+                is_last_chunk = [0] * batch_size
+                # print("GALVEZ:")
+                # torch.cuda.synchronize()
+                for i in range(batch_size):
+                    # Do I need itemsize() here???
+                    # log_probs_ptrs[i] = log_probs.data_ptr() + log_probs.stride(0) * log_probs.element_size() * i
+                    log_probs_list[i] = log_probs[i, :cpu_lengths[i], :]
+                    is_first_chunk[i] = True
+                    is_last_chunk[i]  = True
+                # print(corr_ids)
+                # print(log_probs_list)
+                # print(is_first_chunk)
+                # print(is_last_chunk)
+                channels, partial_hypotheses = \
+                    decoder.decode_batch(corr_ids, log_probs_list,
+                                         is_first_chunk, is_last_chunk)
+                nbest_results = offline_decoder.decode_nbest(log_probs_list, lengths.to(torch.int64).to('cpu'))
+                for nbest_result, ph in zip(nbest_results, partial_hypotheses):
+                    print("offline:", nbest_result[0].score, " online:", ph.score)
+                    print("Offline:", " ".join(word_id_to_word_str[word] for word in nbest_result[0].words))
+                    print("Online:", " ".join(word_id_to_word_str[word] for word in ph.words))
+
+                    print("Offline:", [start_time / 0.04 for start_time in nbest_result[0].word_start_times_seconds])
+                    print("Online:", [start_time for start_time in ph.word_start_times_frames])
+
+                    print("Offline:", [(start_time + duration) / 0.04 for start_time, duration in
+                          zip(nbest_result[0].word_start_times_seconds,
+                              nbest_result[0].word_durations_seconds)])
+                    print("Online:", [end_time for end_time in ph.word_end_times_frames])
+                    assert nbest_result[0].words == ph.words
+                    # print(ph.word_start_times_frames)
+                    # print(ph.word_end_times_frames)
+                # break
+                # print(partial_hypotheses)
+
+    def test_online_one_step(self):
+        nemo_model_name = "stt_en_conformer_ctc_small"
+
+        work_dir = os.path.join(self.temp_dir, "ctc")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG("ctc", work_dir, nemo_model_name)
+        num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
+
+        offline_config = self.create_decoder_config()
+        offline_config.online_opts.max_batch_size = 1
+        config = offline_config.online_opts
+
+        decoder = BatchedMappedOnlineDecoderCuda(
+            config,
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/TLG.fst"),
+            os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"),
+            num_tokens_including_blank,
+        )
+
+        data_loader = torch.utils.data.DataLoader(
+            self.original_dataset_map["test-clean"],
+            batch_size=config.max_batch_size,
+            collate_fn=collate_fn,
+            pin_memory=True,
+        )
+
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        half_precision = True
+        acoustic_scale = 2.2
+
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        word_id_to_word_str = load_word_symbols(os.path.join(work_dir, "graph/graph_ctc_3-gram.pruned.3e-7/words.txt"))
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+            for batch in data_loader:
+                input_signal, input_signal_length, target, utterance_ids = batch
+                input_signal = input_signal.cuda()
+                input_signal_length = input_signal_length.cuda()
+                log_probs, lengths, _ = asr_model.forward(
+                    input_signal=input_signal, input_signal_length=input_signal_length
+                )
+                log_probs *= acoustic_scale
+
+                batch_size = config.max_batch_size  # log_probs.shape[0]
+                cpu_lengths = [1] * batch_size
+                corr_ids = list(range(batch_size))
+                for corr_id in corr_ids:
+                    success = decoder.try_init_corr_id(corr_id)
+                    # Do SetLatticeCallback() here if you want
+                    # Is there some way that I can get the lattice other than callbacks?
+                    assert success
+                log_probs_list = [0] * batch_size
+                is_first_chunk = [0] * batch_size
+                is_last_chunk = [0] * batch_size
+                for i in range(batch_size):
+                    log_probs_list[i] = log_probs[i, :cpu_lengths[i], :]
+                    is_first_chunk[i] = True
+                    # Not really true...
+                    is_last_chunk[i]  = True
+                channels, full_partial_hypotheses = \
+                    decoder.decode_batch(corr_ids, log_probs_list,
+                                         is_first_chunk, is_last_chunk)
+
+                for ph in full_partial_hypotheses:
+                    print("Score:", ph.score)
+                    print("ilabels:", ph.ilabels)
+                    print("Words:", " ".join(word_id_to_word_str[word] for word in ph.words))
+                break
 
 def write_ctm_output(key, result):
     for word, start, end in result:
