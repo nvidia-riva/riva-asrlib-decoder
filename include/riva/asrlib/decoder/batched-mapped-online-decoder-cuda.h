@@ -213,7 +213,6 @@ class BatchedMappedOnlineDecoderCuda {
       }
     }
     if (!list_channels_first_chunk.empty()) {
-      // KALDI_LOG << "GALVEZ:InitDecoding()";
       cuda_decoder_->InitDecoding(list_channels_first_chunk);
     }
 
@@ -241,10 +240,15 @@ class BatchedMappedOnlineDecoderCuda {
     RunCallbacksAndFinalize(corr_ids, channels_, is_last_chunk);
     nvtxRangePop();
 
+    cuda_decoder_->LaunchPartialHypotheses(channels_);
+
     // Why don't I just require the client to call these methods instead?
     // partial hypothesis is a string, which is troublesome for
     // Would prefer std::optional instead...
     if (partial_hypotheses != nullptr) {
+      // No need to wait on
+      // BuildPartialHypothesisOutput. GetPartialHypothesisEx will
+      // synchronize on its own
       for (size_t i = 0; i < channels_.size(); ++i) {
         kaldi::cuda_decoder::ChannelId ichannel = channels_[i];
         partial_hypotheses->push_back(cuda_decoder_->GetPartialHypothesisEx(ichannel));
@@ -269,7 +273,6 @@ class BatchedMappedOnlineDecoderCuda {
       const std::vector<CorrelationID>& corr_ids, const std::vector<int>& channels,
       const std::vector<bool>& is_last_chunk)
   {
-    // KALDI_LOG << "RunCallbacksAndFinalize" << is_last_chunk.size();
     std::vector<kaldi::cuda_decoder::ChannelId> list_channels_last_chunk;
     std::vector<LatticeCallback*> list_lattice_callbacks_last_chunk;
     {
@@ -306,6 +309,8 @@ class BatchedMappedOnlineDecoderCuda {
       return;
     }
 
+    // TODO: Don't bother with any of the rest of this if the user is
+    // not going to use the lattice anyway.
     cuda_decoder_->PrepareForGetRawLattice(list_channels_last_chunk, config_.use_final_probs);
     n_lattice_callbacks_not_done_.fetch_add(
         list_channels_last_chunk.size(), std::memory_order_acquire);
