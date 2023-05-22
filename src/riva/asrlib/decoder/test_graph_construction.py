@@ -319,6 +319,31 @@ class TestGraphConstruction:
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + ERROR_MARGIN
 
+
+    @pytest.mark.ci
+    def test_vanilla_ctc_ci(self):
+        self.test_vanilla_ctc_topo_wer_nbest(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03560559951308582, False)
+        self.test_vanilla_ctc_topo_wer_nbest(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03581482045039562, True)
+        self.test_vanilla_ctc_topo_wer_mbr(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03581482045039562, False)
+        self.test_vanilla_ctc_topo_wer_mbr(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03560559951308582, True)
+
+    @pytest.mark.ci
+    def test_compact_ctc_ci(self):
+        self.test_compact_ctc_topo_wer(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03164942178940962, False)
+        self.test_compact_ctc_topo_wer(
+            "stt_en_conformer_ctc_small", "test-clean",
+            0.03174452221545952, True)
+
     @pytest.mark.parametrize(
         "nemo_model_name, dataset, half_precision",
         [
@@ -1184,6 +1209,7 @@ class TestGraphConstruction:
                     assert abs(ph.score - ph2.score) <= 0.1
                     assert ph.words == ph2.words
 
+    @pytest.mark.ci
     def test_online_decoder(self):
         nemo_model_name = "stt_en_conformer_ctc_small"
 
