@@ -16,8 +16,44 @@ build = "{cp38-manylinux_x86_64,cp39-manylinux_x86_64,cp310-manylinux_x86_64,cp3
 environment = 'RIVA_ASRLIB_DECODER_CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" CUDAARCHS="52-real;60-real;61-real;70-real;75-real;80-real;86" pythonLocation="$(readlink -f $(which python))/.."'
 # nemo_toolkit[asr] depends upon Cython having already been installed because
 # it uses setup.py, not pyproject.toml
-# before-test = "pip install Cython"
-# test-command = "pytest -k 'not throughput' {project}/src/riva/asrlib/decoder/"
-# test-requires = ["pytest", "kaldi-io", "more-itertools", "nemo_toolkit[asr]", "torchaudio"]
+before-test = "pip install Cython"
+test-command = "pytest -m ci {project}/src/riva/asrlib/decoder/"
+test-requires = ["pytest", "kaldi-io", "more-itertools", "nemo_toolkit[asr]", "torchaudio"]
 # 3.11 fails becasue of numba: Cannot install on Python version 3.11.1; only versions >=3.7,<3.11 are supported
-test-skip = "cp311-manylinux_x86_64"
+# 3.10 fails because of some kind of sqlite issue (see below)
+test-skip = "{cp310-manylinux_x86_64,cp311-manylinux_x86_64}"
+
+# _____ ERROR collecting src/riva/asrlib/decoder/test_graph_construction.py ______
+# ImportError while importing test module '/project/src/riva/asrlib/decoder/test_graph_construction.py'.
+# Hint: make sure your test modules/packages have valid Python names.
+# Traceback:
+# /opt/python/cp310-cp310/lib/python3.10/importlib/__init__.py:126: in import_module
+#     return _bootstrap._gcd_import(name[level:], package, level)
+# /project/src/riva/asrlib/decoder/test_graph_construction.py:37: in <module>
+#     import nemo.collections.asr as nemo_asr
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/__init__.py:15: in <module>
+#     from nemo.collections.asr import data, losses, models, modules
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/losses/__init__.py:16: in <module>
+#     from nemo.collections.asr.losses.audio_losses import SDRLoss
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/losses/audio_losses.py:21: in <module>
+#     from nemo.collections.asr.parts.preprocessing.features import make_seq_mask_like
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/parts/preprocessing/__init__.py:16: in <module>
+#     from nemo.collections.asr.parts.preprocessing.features import FeaturizerFactory, FilterbankFeatures, WaveformFeaturizer
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/parts/preprocessing/features.py:44: in <module>
+#     from nemo.collections.asr.parts.preprocessing.perturb import AudioAugmentor
+# ../venv/lib/python3.10/site-packages/nemo/collections/asr/parts/preprocessing/perturb.py:56: in <module>
+#     import webdataset as wd
+# ../venv/lib/python3.10/site-packages/webdataset/__init__.py:10: in <module>
+#     from .fluid import Dataset
+# ../venv/lib/python3.10/site-packages/webdataset/fluid.py:17: in <module>
+#     from .dataset import (
+# ../venv/lib/python3.10/site-packages/webdataset/dataset.py:28: in <module>
+#     from . import dbcache
+# ../venv/lib/python3.10/site-packages/webdataset/dbcache.py:2: in <module>
+#     import sqlite3
+# /opt/python/cp310-cp310/lib/python3.10/sqlite3/__init__.py:57: in <module>
+#     from sqlite3.dbapi2 import *
+# /opt/python/cp310-cp310/lib/python3.10/sqlite3/dbapi2.py:27: in <module>
+#     from _sqlite3 import *
+# E   ImportError: /opt/python/cp310-cp310/lib/python3.10/lib-dynload/_sqlite3.cpython-310-x86_64-linux-gnu.so: undefined symbol: sqlite3_trace_v2
+
