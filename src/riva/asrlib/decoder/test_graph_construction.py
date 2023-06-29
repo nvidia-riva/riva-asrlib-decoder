@@ -42,6 +42,7 @@ import torchaudio
 import torchmetrics
 from nemo.collections.asr.metrics.wer import CTCDecodingConfig
 from nemo.collections.asr.models import ASRModel
+from nemo.collections.asr.parts.submodules.ctc_beam_decoding import BeamCTCInfer, FlashlightConfig
 from ruamel.yaml import YAML
 from torch.utils.data import Dataset, Subset
 from tqdm import tqdm
@@ -403,6 +404,7 @@ class TestGraphConstruction:
             nbest,
             warmup_iters,
             benchmark_iters,
+            DecodeType.MBR,
         )
 
     @pytest.mark.parametrize(
@@ -508,7 +510,7 @@ class TestGraphConstruction:
             1,
         )
         warmup_iters = 2
-        benchmark_iters = 2
+        benchmark_iters = 1
         print("GALVEZ:", acoustic_scale, blank_ilabel, blank_penalty, length_penalty, lm_scale)
         print(f"GALVEZ:model={nemo_model_name} dataset={dataset} compact half_precision={half_precision}")
         self.run_decoder_throughput(
@@ -592,10 +594,35 @@ class TestGraphConstruction:
     # Skip flashlight tests. They use hard-coded paths for flashlight
     # because the code to create a kenlm language model is not
     # directly part of the NeMo library.
-    @pytest.mark.skip
-    @pytest.mark.parametrize("dataset_name,", ["test-clean", "test-other"])
-    def test_flashlight_alone(self, dataset_name):
-        _ = self.run_decoder_flashlight(dataset_name)
+    # @pytest.mark.skip
+    @pytest.mark.parametrize("nemo_model_name, dataset_name",
+                             [
+                                 ("stt_en_conformer_ctc_small","test-clean"),
+                                 ("stt_en_conformer_ctc_small","test-other"),
+                                 ("stt_en_conformer_ctc_small","dev-clean"),
+                                 ("stt_en_conformer_ctc_small","dev-other"),
+                                 ("stt_en_conformer_ctc_medium","test-clean"),
+                                 ("stt_en_conformer_ctc_medium","test-other"),
+                                 ("stt_en_conformer_ctc_medium","dev-clean"),
+                                 ("stt_en_conformer_ctc_medium","dev-other"),
+                                 ("stt_en_conformer_ctc_large","test-clean"),
+                                 ("stt_en_conformer_ctc_large","test-other"),
+                                 ("stt_en_conformer_ctc_large","dev-clean"),
+                                 ("stt_en_conformer_ctc_large","dev-other"),
+                             ]
+    )
+    def test_flashlight_alone(self, nemo_model_name, dataset_name):
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(
+            nemo_model_name, map_location=torch.device("cuda")
+        )
+
+        _ = self.run_decoder_flashlight2(asr_model,
+                                         CacheDataset(torchaudio.datasets.LIBRISPEECH(self.temp_dir, dataset_name, download=True)),
+                                         True,
+                                         1024,
+                                         nemo_model_name,
+                                         dataset_name,
+        )
 
     @pytest.mark.skip
     @pytest.mark.parametrize(
@@ -881,6 +908,101 @@ class TestGraphConstruction:
         # print("greedy WER:", wer(references, all_greedy_predictions))
         return my_wer[0], predictions, references
 
+    def run_decoder_flashlight2(self,
+                                asr_model,
+                                dataset: torch.utils.data.IterableDataset,
+                                half_precision: bool,
+                                # acoustic_scale,
+                                # blank_penalty,
+                                blank_ilabel,
+                                # length_penalty,
+                                # lm_scale,
+                                nemo_model_name,
+                                dataset_name,
+    ):
+        asr_model.preprocessor.featurizer.dither = 0.0
+        asr_model.preprocessor.featurizer.pad_to = 0
+        asr_model.eval()
+        asr_model.encoder.freeze()
+        asr_model.decoder.freeze()
+
+        ctc_infer = BeamCTCInfer(blank_id=blank_ilabel,
+                                 beam_size=16,
+                                 kenlm_path=os.path.join(self.temp_dir, 'lm.bin'),
+                                 flashlight_cfg=FlashlightConfig(
+                                     lexicon_path=os.path.join(
+                                         self.temp_dir, 'flashlight_lexicon.txt/3-gram.pruned.3e-7.lexicon'
+                                     ),
+                                     beam_size_token=16,
+                                     beam_threshold=20.0,
+                                 ))
+        ctc_infer.set_vocabulary(asr_model.tokenizer.tokenizer.get_vocab())
+        ctc_infer.set_decoding_type("subword")
+        ctc_infer.set_tokenizer(asr_model.tokenizer)
+
+
+        data_loader = torch.utils.data.DataLoader(
+            dataset, batch_size=400, num_workers=0, collate_fn=collate_fn, pin_memory=True
+        )
+
+        with ExitStack() as stack:
+            stack.enter_context(torch.inference_mode())
+            if half_precision:
+                stack.enter_context(torch.autocast("cuda"))
+
+            warmup_iters = 1
+            benchmark_iters = 1
+
+            total_audio_length_samples = 0
+
+            references = []
+            hypotheses = []
+
+            for i in range(warmup_iters + benchmark_iters):
+                if i == warmup_iters:
+                    start_time = time.time_ns()
+                    torch.cuda.cudart().cudaProfilerStart()
+                torch.cuda.nvtx.range_push("iteration")
+                for batch in data_loader:
+                    torch.cuda.nvtx.range_push("single batch")
+                    input_signal, input_signal_length, target, utterance_ids = batch
+                    references.extend(target)
+                    if i == 0:
+                        total_audio_length_samples += torch.sum(input_signal_length) * benchmark_iters
+                    input_signal = input_signal.cuda()
+                    input_signal_length = input_signal_length.cuda()
+                    torch.cuda.nvtx.range_push("ASR model")
+                    log_probs, lengths, _ = asr_model.forward(
+                        input_signal=input_signal, input_signal_length=input_signal_length
+                    )
+                    torch.cuda.nvtx.range_pop()
+                    cpu_lengths = lengths.to(torch.int64).to('cpu')
+                    torch.cuda.nvtx.range_push("decoder")
+                    _hypotheses = ctc_infer.flashlight_beam_search(log_probs.to(torch.float32), cpu_lengths)
+
+                    for nbest_hypothesis in _hypotheses:
+                        text = asr_model.tokenizer.ids_to_text(nbest_hypothesis.n_best_hypotheses[0].y_sequence)
+                        hypotheses.append(text)
+                        # print("GALVEZ:", text)
+
+                    # for hyp in _hypotheses:
+                    #     print("GALVEZ:", asr_model.tokenizer.ids_to_text(hyp.n_best_hypotheses[0].y_sequence))
+
+                    torch.cuda.nvtx.range_pop()
+                    torch.cuda.nvtx.range_pop()
+                torch.cuda.nvtx.range_pop()  # iteration
+        end_time = time.time_ns()
+        run_time_seconds = (end_time - start_time) / 1_000_000_000
+        input_time_seconds = total_audio_length_samples / 16_000
+        print("RTFx:", input_time_seconds / run_time_seconds, nemo_model_name, dataset_name)
+
+        references = [s.lower() for s in references]
+        my_wer = wer(references, hypotheses)
+        print("WER:", my_wer)
+
+        torch.cuda.cudart().cudaProfilerStop()
+
+
     # 336.2256739139557 seconds
     def run_decoder_flashlight(self, dataset_string):
         asr_model = nemo_asr.models.ASRModel.restore_from(self.nemo_model_path, map_location=torch.device("cuda"))
@@ -1023,7 +1145,6 @@ class TestGraphConstruction:
         run_time_seconds = (end_time - start_time) / 1_000_000_000
         input_time_seconds = total_audio_length_samples / 16_000
         print("RTFx:", input_time_seconds / run_time_seconds)
-        print("run time:", run_time_seconds)
         torch.cuda.cudart().cudaProfilerStop()
 
 
