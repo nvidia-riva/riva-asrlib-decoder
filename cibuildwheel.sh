@@ -8,4 +8,6 @@ export CIBW_BUILD_VERBOSITY=3
 
 docker build -t $CIBW_MANYLINUX_X86_64_IMAGE .
 
+rm -rf build/
+
 pipx run cibuildwheel --platform linux
