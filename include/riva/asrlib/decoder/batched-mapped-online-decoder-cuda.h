@@ -28,8 +28,6 @@
 
 #include <optional>
 
-#define KALDI_CUDA_DECODER_MIN_NCHANNELS_FACTOR 2
-
 namespace riva::asrlib {
 
 const double kSleepForChannelAvailable = 1e-3;
@@ -105,8 +103,7 @@ struct BatchedMappedOnlineDecoderCudaConfig {
     // Need to do work while latency postprocessing is occurring in order to
     // maximize performance.
 
-    // computing 400 * 2 = 800 here...
-    int min_nchannels = max_batch_size * KALDI_CUDA_DECODER_MIN_NCHANNELS_FACTOR;
+    int min_nchannels = max_batch_size;
     num_channels = std::max(num_channels, min_nchannels);
 
     // If not set use number of physical threads
