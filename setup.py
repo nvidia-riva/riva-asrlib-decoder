@@ -96,7 +96,7 @@ class BuildExtension(build_ext):
 setuptools.setup(
     python_requires='>=3.7',
     name='riva-asrlib-decoder',
-    version='0.4.2',
+    version='0.4.3',
     author='NVIDIA',
     author_email='dgalvez@nvidia.com',
     keywords='ASR, CUDA, WFST, Decoder',

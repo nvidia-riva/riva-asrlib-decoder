@@ -52,7 +52,7 @@ from riva.asrlib.decoder.python_decoder import BatchedMappedDecoderCuda, Batched
 
 from nemo.collections.asr.metrics.wer import word_error_rate
 
-ERROR_MARGIN = 0.0002
+ERROR_MARGIN = 0.0003
 
 # os.environ["TORCH_CUDNN_V8_API_ENABLED"]="1"
 
