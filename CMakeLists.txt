@@ -63,13 +63,12 @@ if(NOT openfst_POPULATED)
     )
   target_include_directories(riva_asrlib_openfst SYSTEM PUBLIC ${openfst_SOURCE_DIR}/src/include/)
   set_target_properties(riva_asrlib_openfst PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-  target_compile_options(riva_asrlib_openfst PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable)
+  target_compile_options(riva_asrlib_openfst PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable -fno-gnu-unique)
 
   add_library(fst-types OBJECT "${openfst_SOURCE_DIR}/src/lib/fst-types.cc")
   target_include_directories(fst-types SYSTEM PUBLIC ${openfst_SOURCE_DIR}/src/include/)
   set_target_properties(fst-types PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-  target_compile_options(fst-types PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable)
-
+  target_compile_options(fst-types PUBLIC -Wno-unused-local-typedefs -Wno-sign-compare -Wno-unused-variable -fno-gnu-unique)
 
   add_library(fstscript_base
     "${openfst_SOURCE_DIR}/src/script/arciterator-class.cc"
