@@ -289,8 +289,10 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
       "decode_write_lattice",
       [](PyClass& cuda_pipeline, LogitsArray& logits, LogitsLengthsArray& logits_lengths,
          const std::vector<std::string>& keys, const std::string& output_wspecifier) {
-        int64_t batch_size = logits_lengths.shape(0);
 
+        int64_t batch_size = logits_lengths.shape(0);
+        // protects clat_writer, which is not thread safe
+        std::mutex write_mutex;
         kaldi::CompactLatticeWriter clat_writer(output_wspecifier);
         for (int64_t i = 0; i < batch_size; ++i) {
           int64_t valid_time_steps = logits_lengths(i);
@@ -301,9 +303,12 @@ NanobindBatchedMappedDecoderCuda(nb::module_& m)
           // stride of each row is stride. Always greater than number of cols
           auto write_results =
               [i, &clat_writer,
-               &keys](riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
+               &keys, &write_mutex](riva::asrlib::BatchedMappedOnlineDecoderCuda::ReturnType& asr_results) {
                 const kaldi::CompactLattice& lattice = std::get<0>(asr_results).value();
-                clat_writer.Write(keys[i], lattice);
+                {
+                  std::lock_guard<std::mutex> lock(write_mutex);
+                  clat_writer.Write(keys[i], lattice);
+                }
               };
           cuda_pipeline.DecodeWithCallback(
               single_sample_logits_start, logits.stride(1), valid_time_steps, write_results);
