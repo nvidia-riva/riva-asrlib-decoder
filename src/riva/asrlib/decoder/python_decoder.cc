@@ -82,6 +82,7 @@ NanobindCudaDecoderConfig(nb::module_& m)
   pyclass.def_rw("blank_penalty", &PyClass::blank_penalty);
   pyclass.def_rw("blank_ilabel", &PyClass::blank_ilabel);
   pyclass.def_rw("length_penalty", &PyClass::length_penalty);
+  pyclass.def_rw("word_length_penalty", &PyClass::word_length_penalty);
 }
 
 void
