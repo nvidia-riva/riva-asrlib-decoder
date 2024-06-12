@@ -130,7 +130,7 @@ class BatchedMappedOnlineDecoderCuda {
       std::unique_ptr<kaldi::TransitionInformation>&& trans_information)
       : config_(config), trans_information_(std::move(trans_information)),
         cuda_fst_(
-            std::make_unique<kaldi::cuda_decoder::CudaFst>(decode_fst, trans_information_.get())),
+                  std::make_unique<kaldi::cuda_decoder::CudaFst>(decode_fst, trans_information_.get(), config.decoder_opts.word_length_penalty != 0.0)),
         // cuda_decoder_(std::make_unique<kaldi::cuda_decoder::CudaDecoder>(
         //     *cuda_fst_, config_.decoder_opts,
         //     // here's the bug!

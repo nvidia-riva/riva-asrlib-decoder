@@ -40,7 +40,7 @@ import pytest
 import torch
 import torchaudio
 import torchmetrics
-from nemo.collections.asr.metrics.wer import CTCDecodingConfig
+from nemo.collections.asr.parts.submodules.ctc_decoding import CTCDecodingConfig
 from nemo.collections.asr.models import ASRModel
 from nemo.collections.asr.parts.submodules.ctc_beam_decoding import BeamCTCInfer, FlashlightConfig
 from ruamel.yaml import YAML
@@ -320,6 +320,65 @@ class TestGraphConstruction:
         # Accept a very tiny margin of error
         assert my_wer <= expected_wer + ERROR_MARGIN
 
+    @pytest.mark.parametrize(
+        "nemo_model_name, dataset, half_precision, topo",
+        [
+            ("stt_en_conformer_ctc_small", "test-clean", False, "ctc"),
+            ("stt_en_conformer_ctc_small", "test-clean", False, "ctc_compact"),
+        ]
+    )
+    def test_sub_ins_del(self, nemo_model_name, dataset, half_precision, topo):
+        work_dir = os.path.join(self.temp_dir, f"{topo}_{nemo_model_name}")
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(nemo_model_name, map_location=torch.device("cuda"))
+        self.create_TLG(topo, work_dir, nemo_model_name)
+
+        acoustic_scale = 1.0 # / 0.55
+        blank_ilabel = 1024
+        blank_penalty = 0.0
+        length_penalty = 0.0
+        lm_scale = 1.0  # 0.8
+        nbest = 1
+
+        sweep = (-12.0, -11.5, -11.0, -10.5, -10.0, -9.5, -9.0, -8.5, -8.0,
+                 -7.5, -7.0, -6.5, -6.0, -5.5, -5.0, -4.5, -4.0, -3.5,
+                 -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5,
+                 2.0)
+
+        for word_length_penalty in sweep:
+            print("GALVEZ:, word_length_penalty=", word_length_penalty)
+            my_wer, _, _ = self.run_decoder(
+                asr_model,
+                os.path.join(work_dir, f"graph/graph_{topo}_3-gram.pruned.3e-7"),
+                self.dataset_map[dataset],
+                half_precision,
+                acoustic_scale,
+                blank_penalty,
+                blank_ilabel,
+                length_penalty,
+                lm_scale,
+                nbest,
+                DecodeType.NBEST,
+                word_length_penalty
+            )
+
+        word_length_penalty = 0.0
+
+        for length_penalty in sweep:
+            print("GALVEZ:, length_penalty=", length_penalty)
+            my_wer, _, _ = self.run_decoder(
+                asr_model,
+                os.path.join(work_dir, f"graph/graph_{topo}_3-gram.pruned.3e-7"),
+                self.dataset_map[dataset],
+                half_precision,
+                acoustic_scale,
+                blank_penalty,
+                blank_ilabel,
+                length_penalty,
+                lm_scale,
+                nbest,
+                DecodeType.NBEST,
+                word_length_penalty
+            )
 
     @pytest.mark.ci
     def test_vanilla_ctc_ci(self):
@@ -810,6 +869,7 @@ class TestGraphConstruction:
         lm_scale,
         nbest,
         decode_type: DecodeType,
+        word_length_penalty = 0.0,
     ):
         num_tokens_including_blank = len(asr_model.to_config_dict()["decoder"]["vocabulary"]) + 1
 
@@ -817,6 +877,7 @@ class TestGraphConstruction:
         config.online_opts.decoder_opts.blank_penalty = blank_penalty
         config.online_opts.decoder_opts.blank_ilabel = blank_ilabel
         config.online_opts.decoder_opts.length_penalty = length_penalty
+        config.online_opts.decoder_opts.word_length_penalty = word_length_penalty
         config.online_opts.lattice_postprocessor_opts.lm_scale = lm_scale
         config.online_opts.lattice_postprocessor_opts.nbest = nbest
 
